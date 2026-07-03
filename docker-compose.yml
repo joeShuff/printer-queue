@@ -1,0 +1,44 @@
+services:
+  printer-queue:
+    build: .
+    container_name: printer-queue
+    restart: unless-stopped
+    ports:
+      - "7125:7125"       # Exposed on the host; point OrcaSlicer here
+    volumes:
+      - printer-queue-data:/data   # Uploaded files + SQLite DB survive restarts
+    environment:
+      # -----------------------------------------------------------------------
+      # Printer connection (required)
+      # Find these on the printer: Settings → Network → LAN Mode
+      # -----------------------------------------------------------------------
+      PRINTER_IP: "192.168.1.XXX"        # <-- change to your AD5X's IP
+      PRINTER_SERIAL: "YOUR_SERIAL"      # <-- serial number from LAN mode screen
+      PRINTER_CHECK_CODE: "YOUR_CODE"    # <-- 8-digit check code from LAN mode screen
+
+      # -----------------------------------------------------------------------
+      # API authentication (recommended)
+      # OrcaSlicer sends X-Api-Key on every request; set the same value here
+      # and in OrcaSlicer's "API Key" field.
+      # Leave blank (or omit) to run without auth on a trusted LAN.
+      # -----------------------------------------------------------------------
+      API_KEY: "change-me-to-something-secret"
+
+      # -----------------------------------------------------------------------
+      # Print job defaults (optional)
+      # -----------------------------------------------------------------------
+      LEVELING_BEFORE_PRINT: "true"    # Run ABL before each print
+      START_PRINT_IMMEDIATELY: "true"  # Start as soon as file is uploaded to printer
+
+      # -----------------------------------------------------------------------
+      # Internal paths (usually no need to change)
+      # -----------------------------------------------------------------------
+      DATA_DIR: "/data"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7125/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  printer-queue-data:
