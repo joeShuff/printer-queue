@@ -12,6 +12,6 @@ if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=7125,
+        port=8898,
         reload=True,   # auto-reload on file changes while debugging
     )
