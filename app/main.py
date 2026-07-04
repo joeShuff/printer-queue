@@ -163,7 +163,8 @@ async def upload_gcode(request: Request) -> JSONResponse:
         return JSONResponse({"code": 1, "message": "No gcodeFile field"})
 
     filename = file_field.filename or "unknown.gcode"
-    file_size = int(request.headers.get("filesize", file_field.size or 0))
+    file_bytes = await file_field.read()
+    file_size = len(file_bytes)
 
     # -- Decode UI metadata from headers --
     material_mappings = _decode_mappings(request.headers.get("materialmappings", ""))
@@ -201,8 +202,14 @@ async def upload_gcode(request: Request) -> JSONResponse:
     db.set_body_path(job["id"], str(body_path))
     job["body_path"] = str(body_path)
 
-    log.info("Queued job id=%d filename=%s size=%d body=%s",
-             job["id"], filename, file_size, body_path.name)
+    # Preserve compound extensions like .gcode.3mf
+    name = Path(filename).name
+    suffix = name[name.index("."):]  if "." in name else ""
+    gcode_path = Path(settings.UPLOAD_DIR) / f"{job['id']}{suffix}"
+    gcode_path.write_bytes(file_bytes)
+    db.set_gcode_path(job["id"], str(gcode_path))
+
+    log.info("Queued job id=%d filename=%s size=%d", job["id"], filename, file_size)
     return JSONResponse({"code": 0, "message": "Success"})
 
 
@@ -317,7 +324,7 @@ async def cleanup() -> dict[str, Any]:
     Delete body files on disk no longer referenced by active jobs,
     then hard-purge deleted rows from the DB.
     """
-    active = db.active_body_paths()
+    active = db.active_file_paths()
     upload_dir = Path(settings.UPLOAD_DIR)
     removed_files: list[str] = []
     errors: list[str] = []

@@ -38,6 +38,7 @@ def get_conn() -> sqlite3.Connection:
                 -- Raw replay data
                 raw_headers     TEXT    NOT NULL,  -- JSON dict of all request headers
                 body_path       TEXT    NOT NULL,  -- path to the saved raw multipart body on disk
+                gcode_path      TEXT,              -- path to the extracted 3mf/gcode file
 
                 -- UI metadata (decoded from the request at upload time)
                 filename        TEXT    NOT NULL,
@@ -119,6 +120,13 @@ def set_body_path(job_id: int, body_path: str) -> None:
         conn.commit()
 
 
+def set_gcode_path(job_id: int, gcode_path: str) -> None:
+    with _lock:
+        conn = get_conn()
+        conn.execute("UPDATE jobs SET gcode_path = ? WHERE id = ?", (gcode_path, job_id))
+        conn.commit()
+
+
 def get_job(job_id: int) -> dict[str, Any] | None:
     conn = get_conn()
     row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -172,13 +180,19 @@ def delete_job(job_id: int) -> bool:
         return cur.rowcount > 0
 
 
-def active_body_paths() -> set[str]:
-    """Return body_paths referenced by any non-deleted job."""
+def active_file_paths() -> set[str]:
+    """Return all file paths (body + gcode) referenced by any non-deleted job."""
     conn = get_conn()
     rows = conn.execute(
-        "SELECT body_path FROM jobs WHERE status != 'deleted'"
+        "SELECT body_path, gcode_path FROM jobs WHERE status != 'deleted'"
     ).fetchall()
-    return {r["body_path"] for r in rows}
+    paths = set()
+    for r in rows:
+        if r["body_path"]:
+            paths.add(r["body_path"])
+        if r["gcode_path"]:
+            paths.add(r["gcode_path"])
+    return paths
 
 
 def hard_delete_deleted_jobs() -> int:
