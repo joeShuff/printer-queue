@@ -68,18 +68,26 @@ def add_job(
     filename: str,
     filepath: str,
     upload_headers: dict | None = None,
+    material_mappings: list | None = None,
+    use_matl_station: bool = False,
+    leveling_before_print: bool | None = None,
 ) -> dict[str, Any]:
+    if leveling_before_print is None:
+        leveling_before_print = settings.LEVELING_BEFORE_PRINT
     with _lock:
         conn = get_conn()
         cur = conn.execute(
             """INSERT INTO jobs
-               (filename, filepath, status, upload_headers, leveling_before_print, created_at)
-               VALUES (?, ?, 'queued', ?, ?, ?)""",
+               (filename, filepath, status, upload_headers, material_mappings,
+                use_matl_station, leveling_before_print, created_at)
+               VALUES (?, ?, 'queued', ?, ?, ?, ?, ?)""",
             (
                 filename,
                 filepath,
                 json.dumps(upload_headers or {}),
-                1 if settings.LEVELING_BEFORE_PRINT else 0,
+                json.dumps(material_mappings or []),
+                1 if use_matl_station else 0,
+                1 if leveling_before_print else 0,
                 time.time(),
             ),
         )

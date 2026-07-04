@@ -163,6 +163,9 @@ async def upload_gcode(request: Request) -> JSONResponse:
     if not _check_auth(serial, check_code):
         return JSONResponse({"code": 1, "message": "Authentication failed"})
 
+    # Log every header OrcaSlicer sends so we can see exactly what comes in
+    log.info("uploadGcode headers: %s", dict(request.headers))
+
     # -- Parse multipart --
     try:
         form = await request.form()
@@ -200,10 +203,27 @@ async def upload_gcode(request: Request) -> JSONResponse:
         "useMatlStation":       request.headers.get("useMatlStation", "false"),
     }
 
+    # OrcaSlicer sends materialMappings as a base64-encoded JSON string in
+    # the header when using the single-call flow (printNow=true).
+    # Decode it now so it's ready to replay when the job is dispatched.
+    material_mappings = []
+    use_matl_station = upload_headers["useMatlStation"].lower() == "true"
+    raw_mappings = request.headers.get("materialMappings", "")
+    if raw_mappings:
+        try:
+            decoded = base64.b64decode(raw_mappings).decode("utf-8")
+            material_mappings = json.loads(decoded)
+            log.info("Decoded materialMappings from header: %s", material_mappings)
+        except Exception as exc:
+            log.warning("Failed to decode materialMappings header: %s (raw=%r)", exc, raw_mappings)
+
     job = db.add_job(
         filename=dest.name,
         filepath=str(dest),
         upload_headers=upload_headers,
+        material_mappings=material_mappings,
+        use_matl_station=use_matl_station,
+        leveling_before_print=upload_headers["levelingBeforePrint"].lower() == "true",
     )
     log.info("Queued job id=%d filename=%s", job["id"], dest.name)
 
@@ -224,6 +244,8 @@ async def print_gcode(request: Request) -> JSONResponse:
     We do NOT forward to the printer yet.
     """
     body = await request.json()
+    log.info("printGcode full body: %s", body)  # log everything for debugging
+
     if not _check_auth(body.get("serialNumber", ""), body.get("checkCode", "")):
         return JSONResponse({"code": 1, "message": "Authentication failed"})
 
@@ -237,9 +259,24 @@ async def print_gcode(request: Request) -> JSONResponse:
         filename, use_matl_station, material_mappings
     )
 
-    # Find the queued job for this filename and attach the mappings
+    # Match on filename. OrcaSlicer sends the original name (before our
+    # dedup suffix), so also try matching on the stem in case we renamed it.
     jobs = db.list_jobs(status="queued")
     matched = next((j for j in reversed(jobs) if j["filename"] == filename), None)
+
+    if not matched:
+        # Fallback: OrcaSlicer sent the original name but we stored it with a
+        # dedup suffix (e.g. "model.gcode.3mf" vs "model_1.gcode.3mf").
+        # Match on the most recently queued job whose filename starts with the stem.
+        stem = filename.split(".")[0]  # everything before first dot
+        matched = next(
+            (j for j in reversed(jobs) if j["filename"].startswith(stem)), None
+        )
+        if matched:
+            log.info(
+                "printGcode: matched by stem '%s' → job id=%d filename=%s",
+                stem, matched["id"], matched["filename"]
+            )
 
     if matched:
         db.set_print_gcode_data(
@@ -250,7 +287,8 @@ async def print_gcode(request: Request) -> JSONResponse:
         )
         log.info("Attached materialMappings to job id=%d", matched["id"])
     else:
-        log.warning("printGcode: no queued job found for filename=%s", filename)
+        log.warning("printGcode: no queued job found for filename=%s (all queued: %s)",
+                    filename, [j["filename"] for j in jobs])
 
     return JSONResponse({"code": 0, "message": "Success"})
 
