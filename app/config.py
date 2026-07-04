@@ -4,12 +4,6 @@ Configuration loaded from environment variables.
 import os
 
 
-def _bool_env(name: str, default: bool) -> bool:
-    val = os.getenv(name)
-    if val is None:
-        return default
-    return val.strip().lower() in ("1", "true", "yes", "on")
-
 
 class Settings:
     # --- Storage ---
@@ -25,10 +19,7 @@ class Settings:
     PRINTER_SERIAL: str = os.getenv("PRINTER_SERIAL", "")
     PRINTER_CHECK_CODE: str = os.getenv("PRINTER_CHECK_CODE", "")
 
-    # --- Print job defaults ---
-    # Whether to run auto bed-levelling before each print.
-    # OrcaSlicer also sends this per-job; this is the fallback default.
-    LEVELING_BEFORE_PRINT: bool = _bool_env("LEVELING_BEFORE_PRINT", True)
+
 
 
 settings = Settings()
