@@ -46,7 +46,7 @@ def get_conn() -> sqlite3.Connection:
                 tool_count      INTEGER NOT NULL DEFAULT 1,
                 use_matl_station INTEGER NOT NULL DEFAULT 0,
                 leveling_before_print INTEGER NOT NULL DEFAULT 0,
-                printing_time   INTEGER NOT NULL DEFAULT 0,  -- seconds
+                printing_time   INTEGER NOT NULL DEFAULT 0,  -- seconds (from prediction key)
                 total_layers    INTEGER NOT NULL DEFAULT 0,
                 material_mappings TEXT,  -- JSON list decoded from materialMappings header
                 content_type    TEXT    NOT NULL  -- multipart content-type with boundary
@@ -127,6 +127,16 @@ def set_gcode_path(job_id: int, gcode_path: str) -> None:
         conn.commit()
 
 
+def set_print_meta(job_id: int, printing_time: int, total_layers: int) -> None:
+    with _lock:
+        conn = get_conn()
+        conn.execute(
+            "UPDATE jobs SET printing_time = ?, total_layers = ? WHERE id = ?",
+            (printing_time, total_layers, job_id),
+        )
+        conn.commit()
+
+
 def get_job(job_id: int) -> dict[str, Any] | None:
     conn = get_conn()
     row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -172,7 +182,15 @@ def set_status(job_id: int, status: str, error: str | None = None) -> None:
         conn.commit()
 
 
-def delete_job(job_id: int) -> bool:
+def clear_queue() -> int:
+    """Soft-delete all jobs that haven't been sent yet. Returns count affected."""
+    with _lock:
+        conn = get_conn()
+        cur = conn.execute(
+            "UPDATE jobs SET status = 'deleted' WHERE status IN ('queued', 'error')"
+        )
+        conn.commit()
+        return cur.rowcount
     with _lock:
         conn = get_conn()
         cur = conn.execute("UPDATE jobs SET status = 'deleted' WHERE id = ?", (job_id,))

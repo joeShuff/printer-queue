@@ -48,6 +48,7 @@ from fastapi.responses import JSONResponse
 
 from . import db
 from .config import settings
+from .threemf import extract_meta
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
@@ -209,6 +210,15 @@ async def upload_gcode(request: Request) -> JSONResponse:
     gcode_path.write_bytes(file_bytes)
     db.set_gcode_path(job["id"], str(gcode_path))
 
+    # Extract print time + layer count from the 3mf metadata.
+    # OrcaSlicer does not send these as headers for .gcode.3mf uploads so we
+    # parse them out of slice_info.config inside the archive.
+    meta = extract_meta(gcode_path)
+    if meta.printing_time or meta.total_layers:
+        db.set_print_meta(job["id"], meta.printing_time, meta.total_layers)
+        log.info("Job %d: printing_time=%ds total_layers=%d",
+                 job["id"], meta.printing_time, meta.total_layers)
+
     log.info("Queued job id=%d filename=%s size=%d", job["id"], filename, file_size)
     return JSONResponse({"code": 0, "message": "Success"})
 
@@ -316,6 +326,13 @@ async def delete_job(job_id: int) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     db.delete_job(job_id)
     return {"deleted": True, "job_id": job_id}
+
+
+@app.post("/queue/clear")
+async def clear_queue() -> dict[str, Any]:
+    """Soft-delete all queued (and errored) jobs that haven't been sent."""
+    count = db.clear_queue()
+    return {"cleared": count}
 
 
 @app.post("/queue/cleanup")
