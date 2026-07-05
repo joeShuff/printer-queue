@@ -36,6 +36,7 @@ UTILITY:
   GET  /health                    no-auth health check
 """
 
+import asyncio
 import base64
 import json
 import logging
@@ -220,7 +221,84 @@ async def upload_gcode(request: Request) -> JSONResponse:
                  job["id"], meta.printing_time, meta.total_layers)
 
     log.info("Queued job id=%d filename=%s size=%d", job["id"], filename, file_size)
+
+    # -- Auto-dispatch if OrcaSlicer requested printNow and printer is idle --
+    print_now = request.headers.get("printnow", "false").lower() == "true"
+    if print_now:
+        if await _printer_is_idle():
+            log.info("Job %d: printNow=true and printer idle — dispatching immediately", job["id"])
+            asyncio.create_task(_dispatch_job(job))
+        else:
+            log.info("Job %d: printNow=true but printer is busy — job queued", job["id"])
+
     return JSONResponse({"code": 0, "message": "Success"})
+
+
+# ---------------------------------------------------------------------------
+# Dispatch helpers
+# ---------------------------------------------------------------------------
+
+async def _printer_is_idle() -> bool:
+    """Return True if the printer is connected and not currently printing."""
+    if not settings.PRINTER_IP:
+        return False
+    try:
+        result = await _proxy("/detail", {
+            "serialNumber": settings.PRINTER_SERIAL,
+            "checkCode":    settings.PRINTER_CHECK_CODE,
+        })
+        state = result.get("detail", {}).get("status", "").lower()
+        return state in ("ready", "idle", "free")
+    except Exception:
+        return False
+
+
+async def _dispatch_job(job: dict) -> None:
+    """
+    Upload a queued job's saved raw body to the real printer.
+    Updates job status to 'sending' → 'sent' or 'error'.
+    Safe to call from a background task.
+    """
+    job_id = job["id"]
+    db.set_status(job_id, "sending")
+
+    body_path = Path(job["body_path"])
+    if not body_path.exists():
+        msg = f"Raw body file missing from disk: {body_path}"
+        log.error("Job %d: %s", job_id, msg)
+        db.set_status(job_id, "error", msg)
+        return
+
+    try:
+        raw_body = body_path.read_bytes()
+        headers = dict(job["raw_headers"])
+        headers["serialnumber"] = settings.PRINTER_SERIAL
+        headers["checkcode"]    = settings.PRINTER_CHECK_CODE
+        headers["printnow"]     = "true"
+
+        url     = f"{PRINTER_BASE}/uploadGcode"
+        timeout = aiohttp.ClientTimeout(total=120)
+
+        log.info("Dispatching job %d to printer: %s (%d bytes)",
+                 job_id, job["filename"], len(raw_body))
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, data=raw_body, headers=headers) as resp:
+                result = await resp.json(content_type=None)
+
+        if result.get("code") != 0:
+            msg = f"Printer rejected job: {result}"
+            log.error("Job %d: %s", job_id, msg)
+            db.set_status(job_id, "error", msg)
+            return
+
+        db.set_status(job_id, "sent")
+        log.info("Job %d sent OK", job_id)
+
+    except Exception as exc:
+        msg = str(exc)
+        log.exception("_dispatch_job failed for job %d", job_id)
+        db.set_status(job_id, "error", msg)
 
 
 # ---------------------------------------------------------------------------
@@ -263,60 +341,18 @@ async def queue_status() -> dict[str, Any]:
 
 @app.post("/queue/next")
 async def send_next_job() -> dict[str, Any]:
-    """
-    Replay the next queued job to the real printer.
-    The saved raw body is sent with the original headers — byte-for-byte
-    identical to what OrcaSlicer sent, except serialNumber/checkCode come
-    from env vars (in case they differ), and printNow is forced to true.
-    """
+    """Dispatch the next queued job to the printer. Called from Home Assistant."""
     job = db.next_queued_job()
     if not job:
         raise HTTPException(status_code=409, detail="Queue is empty")
 
-    db.set_status(job["id"], "sending")
+    await _dispatch_job(job)
 
-    body_path = Path(job["body_path"])
-    if not body_path.exists():
-        msg = f"Raw body file missing from disk: {body_path}"
-        log.error("Job %d: %s", job["id"], msg)
-        db.set_status(job["id"], "error", msg)
-        raise HTTPException(status_code=500, detail=msg)
+    job = db.get_job(job["id"])
+    if job["status"] == "error":
+        raise HTTPException(status_code=502, detail=job.get("error", "Printer error"))
 
-    try:
-        raw_body = body_path.read_bytes()
-
-        # Rebuild headers from saved dict, override auth + printNow
-        headers = dict(job["raw_headers"])
-        headers["serialnumber"] = settings.PRINTER_SERIAL
-        headers["checkcode"]    = settings.PRINTER_CHECK_CODE
-        headers["printnow"]     = "true"
-
-        url = f"{PRINTER_BASE}/uploadGcode"
-        timeout = aiohttp.ClientTimeout(total=120)
-
-        log.info("Replaying job %d to printer: %s (%d bytes body)",
-                 job["id"], job["filename"], len(raw_body))
-
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, data=raw_body, headers=headers) as resp:
-                result = await resp.json(content_type=None)
-
-        if result.get("code") != 0:
-            msg = f"Printer rejected job: {result}"
-            db.set_status(job["id"], "error", msg)
-            raise HTTPException(status_code=502, detail=msg)
-
-        db.set_status(job["id"], "sent")
-        log.info("Job %d sent OK", job["id"])
-        return {"success": True, "job": job}
-
-    except HTTPException:
-        raise
-    except Exception as exc:
-        msg = str(exc)
-        log.exception("send_next_job failed for job %d", job["id"])
-        db.set_status(job["id"], "error", msg)
-        raise HTTPException(status_code=502, detail=msg)
+    return {"success": True, "job": job}
 
 
 @app.delete("/queue/{job_id}")
