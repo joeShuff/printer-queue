@@ -355,6 +355,38 @@ async def send_next_job() -> dict[str, Any]:
     return {"success": True, "job": job}
 
 
+@app.post("/queue/{job_id}/requeue")
+async def requeue_job(job_id: int) -> dict[str, Any]:
+    """Move any job back to queued status so it will be picked up by Send Next."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    db.requeue_job(job_id)
+    return {"requeued": True, "job": db.get_job(job_id)}
+
+
+@app.post("/queue/{job_id}/send")
+async def send_specific_job(job_id: int) -> dict[str, Any]:
+    """Immediately dispatch a specific job to the printer regardless of queue position or printer state."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["status"] == "deleted":
+        raise HTTPException(status_code=400, detail="Cannot send a deleted job")
+
+    # Force status back to queued so _dispatch_job can update it properly
+    db.requeue_job(job_id)
+    job = db.get_job(job_id)
+
+    await _dispatch_job(job)
+
+    job = db.get_job(job_id)
+    if job["status"] == "error":
+        raise HTTPException(status_code=502, detail=job.get("error", "Printer error"))
+
+    return {"success": True, "job": job}
+
+
 @app.get("/queue/{job_id}/thumbnail")
 async def job_thumbnail(job_id: int) -> Response:
     """Return the plate thumbnail PNG extracted from the job's .gcode.3mf."""

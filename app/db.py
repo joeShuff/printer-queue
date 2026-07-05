@@ -2,7 +2,7 @@
 SQLite-backed queue store.
 
 Each job stores:
-  - Raw request headers + body path for byte-for-like replay to the printer
+  - Raw request headers + body path for byte-for-byte replay to the printer
   - UI metadata: filename, file size, material mappings, tool count, estimated
     print time, leveling flag — everything needed to build a queue UI
 """
@@ -28,28 +28,25 @@ def get_conn() -> sqlite3.Connection:
         _conn.execute(
             """
             CREATE TABLE IF NOT EXISTS jobs (
-                -- Identity
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 status          TEXT    NOT NULL DEFAULT 'queued',
                 created_at      REAL    NOT NULL,
                 sent_at         REAL,
                 error           TEXT,
 
-                -- Raw replay data
-                raw_headers     TEXT    NOT NULL,  -- JSON dict of all request headers
-                body_path       TEXT    NOT NULL,  -- path to the saved raw multipart body on disk
-                gcode_path      TEXT,              -- path to the extracted 3mf/gcode file
+                raw_headers     TEXT    NOT NULL,
+                body_path       TEXT    NOT NULL,
+                gcode_path      TEXT,
 
-                -- UI metadata (decoded from the request at upload time)
                 filename        TEXT    NOT NULL,
                 file_size       INTEGER NOT NULL DEFAULT 0,
                 tool_count      INTEGER NOT NULL DEFAULT 1,
                 use_matl_station INTEGER NOT NULL DEFAULT 0,
                 leveling_before_print INTEGER NOT NULL DEFAULT 0,
-                printing_time   INTEGER NOT NULL DEFAULT 0,  -- seconds (from prediction key)
+                printing_time   INTEGER NOT NULL DEFAULT 0,
                 total_layers    INTEGER NOT NULL DEFAULT 0,
-                material_mappings TEXT,  -- JSON list decoded from materialMappings header
-                content_type    TEXT    NOT NULL  -- multipart content-type with boundary
+                material_mappings TEXT,
+                content_type    TEXT    NOT NULL DEFAULT ''
             )
             """
         )
@@ -182,8 +179,29 @@ def set_status(job_id: int, status: str, error: str | None = None) -> None:
         conn.commit()
 
 
+def requeue_job(job_id: int) -> bool:
+    """Reset any job back to queued so it can be sent again."""
+    with _lock:
+        conn = get_conn()
+        cur = conn.execute(
+            "UPDATE jobs SET status = 'queued', sent_at = NULL, error = NULL WHERE id = ?",
+            (job_id,),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def delete_job(job_id: int) -> bool:
+    """Soft-delete a job (marks as deleted, file stays on disk)."""
+    with _lock:
+        conn = get_conn()
+        cur = conn.execute("UPDATE jobs SET status = 'deleted' WHERE id = ?", (job_id,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
 def clear_queue() -> int:
-    """Soft-delete all jobs that haven't been sent yet. Returns count affected."""
+    """Soft-delete all queued/error jobs. Returns count affected."""
     with _lock:
         conn = get_conn()
         cur = conn.execute(
@@ -191,11 +209,6 @@ def clear_queue() -> int:
         )
         conn.commit()
         return cur.rowcount
-    with _lock:
-        conn = get_conn()
-        cur = conn.execute("UPDATE jobs SET status = 'deleted' WHERE id = ?", (job_id,))
-        conn.commit()
-        return cur.rowcount > 0
 
 
 def active_file_paths() -> set[str]:
