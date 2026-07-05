@@ -1,23 +1,20 @@
 # AD5X Printer Queue
 
-A self-hosted print queue server for the FlashForge AD5X (with IFS).  
-Upload sliced jobs from OrcaSlicer, then trigger the next print from a Home Assistant button.
+A self-hosted print queue server for the FlashForge AD5X (with IFS).
+Upload sliced jobs from OrcaSlicer, manage them via a web UI, then trigger prints manually or automatically from Home Assistant.
 
 ---
 
 ## How it works
 
 ```
-OrcaSlicer  ──POST /api/files/local──►  Queue server  ──FlashForge LAN API──►  AD5X
-                                              ▲
-                              POST /queue/next│
-                                         Home Assistant button
+OrcaSlicer  ──/uploadGcode──►  Queue server  ──FlashForge HTTP API──►  AD5X
+                                    ▲
+                  POST /queue/next  │
+                               Home Assistant / Web UI
 ```
 
-1. You slice in OrcaSlicer and click **Send** (Print Host upload).
-2. The server stores the file and adds it to the queue.
-3. When the previous print is done and you've cleared the bed, press the Home Assistant button.
-4. The server picks the oldest queued file, uploads it to the printer over LAN, and starts the print.
+The server acts as a **transparent proxy** — OrcaSlicer thinks it's talking directly to the printer. Status and IFS slot queries are forwarded live to the real printer so the material picker in OrcaSlicer shows your actual loaded spools. Uploads are intercepted and queued instead of being sent immediately.
 
 ---
 
@@ -26,17 +23,17 @@ OrcaSlicer  ──POST /api/files/local──►  Queue server  ──FlashForge
 ### 1. Configure and start the container
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/joeShuff/printer-queue.git
 cd printer-queue
 
-# Edit docker-compose.yml — fill in PRINTER_IP, PRINTER_SERIAL, PRINTER_CHECK_CODE, API_KEY
+# Edit docker-compose.yml with your printer IP, serial, and check code
 nano docker-compose.yml
 
 docker compose up -d
-docker compose logs -f   # watch startup
+docker compose logs -f
 ```
 
-The service listens on **port 7125** (you can change this in `docker-compose.yml`).
+The service listens on **port 8898** — the same port OrcaSlicer expects for FlashForge printers.
 
 ### 2. Get your printer credentials
 
@@ -46,132 +43,108 @@ On the AD5X touchscreen:
 Settings → Network → LAN Mode → Enable
 ```
 
-Note the **Serial Number** and **Check Code** shown on screen.  
-Assign the printer a static IP in your router's DHCP settings.
+Note the **Serial Number** and **Check Code**. Assign the printer a static IP in your router.
 
 ### 3. Configure OrcaSlicer
 
-In OrcaSlicer, open your **Printer settings → General**:
+In OrcaSlicer, open your **Printer settings → General** and set the connection type to **FlashForge** (not OctoPrint):
 
 | Field | Value |
 |---|---|
-| Print Host | `OctoPrint` |
-| Hostname / IP | `http://<your-server-ip>:7125` |
-| API Key | same value you set as `API_KEY` in docker-compose.yml |
+| IP Address | your queue server's IP |
+| Port | 8898 |
+| Serial Number | same as `PRINTER_SERIAL` env var |
+| Check Code | same as `PRINTER_CHECK_CODE` env var |
 
-Click **Test** — you should see a success message.
+Click **Test** — OrcaSlicer will connect to the queue server, which proxies the request to the real printer. The IFS slot picker will show your actual loaded filaments.
 
-After slicing, use **Print → Send** (or the cloud/upload icon) to push the file to the queue.
+When you click **Print**, the file is queued rather than sent immediately (unless the printer is idle and `printNow` is set, in which case it auto-dispatches).
 
-> **OrcaSlicer 2.4+ and .gcode.3mf files**  
-> OrcaSlicer 2.4 added an option to send sliced jobs as `.gcode.3mf` packages instead of plain `.gcode`.  
-> Enable this in your AD5X printer profile for the best IFS material-mapping support:  
-> `Printer settings → General → Send as .gcode.3mf`  
-> The server will automatically extract the filament/colour data and pass it to the IFS.
+### 4. Web UI
 
-### 4. Add a Home Assistant button
+Visit `http://<server-ip>:8898` in your browser for the queue management UI.
 
-In Home Assistant, create a **REST command** and then add a **Button card**.
+Features:
+- Live printer status with progress bar
+- Queue stats (queued / sending / sent / errors / removed)
+- Model thumbnail previews extracted from the `.gcode.3mf`
+- Drag-to-reorder queued jobs
+- Per-job buttons: **Send Now**, **Requeue**, **Remove**
+- Toggle to show soft-deleted jobs
+- **Send Next**, **Clear Queue**, and **Purge** global actions
 
-**`configuration.yaml`** (or a separate `rest_command.yaml`):
+---
 
-```yaml
-rest_command:
-  print_next_job:
-    url: "http://<your-server-ip>:7125/queue/next"
-    method: POST
-    headers:
-      X-Api-Key: "change-me-to-something-secret"
-    content_type: "application/json"
-```
-
-Restart Home Assistant, then add a **Button card** to a dashboard:
+## Docker Compose
 
 ```yaml
-type: button
-name: "Print Next Job"
-icon: mdi:printer-3d
-tap_action:
-  action: call-service
-  service: rest_command.print_next_job
-```
+services:
+  printer-queue:
+    image: ghcr.io/joeshuff/printer-queue:latest
+    ports:
+      - "8898:8898"
+    volumes:
+      - printer-queue-data:/data
+    environment:
+      PRINTER_IP: "192.168.1.XXX"
+      PRINTER_SERIAL: "YOUR_SERIAL"
+      PRINTER_CHECK_CODE: "YOUR_CODE"
 
-**Optional — queue status sensor:**
-
-```yaml
-sensor:
-  - platform: rest
-    name: "Printer Queue Status"
-    resource: "http://<your-server-ip>:7125/queue/status"
-    headers:
-      X-Api-Key: "change-me-to-something-secret"
-    json_attributes:
-      - printer
-      - next_job
-      - queued_count
-    value_template: "{{ value_json.printer.state }}"
-    scan_interval: 30
+volumes:
+  printer-queue-data:
 ```
 
 ---
 
 ## API reference
 
-All endpoints (except `/health`) require `X-Api-Key: <your-key>` header when `API_KEY` is set.
+### Proxied to printer (live)
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Health check (no auth) |
-| `GET` | `/api/version` | OctoPrint shim — OrcaSlicer compatibility check |
-| `POST` | `/api/files/local` | **Upload file** — OrcaSlicer posts here |
-| `GET` | `/api/files/local` | List files (OctoPrint shim) |
-| `GET` | `/queue` | Full job list with statuses |
+| `POST` | `/product` | Printer capabilities |
+| `POST` | `/detail` | Live status + IFS slot info |
+| `POST` | `/control` | Pause / resume / cancel |
+| `POST` | `/gcodeList` | File list on printer |
+| `POST` | `/gcodeThumb` | Thumbnail from printer |
+
+### Queue management
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/` | Web UI |
+| `GET` | `/queue` | List jobs (`?include_deleted=true` to show removed) |
 | `GET` | `/queue/status` | Live printer state + next queued job |
-| `POST` | `/queue/next` | **Send next job to printer** — Home Assistant button |
-| `DELETE` | `/queue/{id}` | Remove a job from the queue |
+| `POST` | `/queue/next` | Send next queued job to printer |
+| `POST` | `/queue/reorder` | Reorder queue — body: `{"order": [id1, id2, ...]}` |
+| `POST` | `/queue/clear` | Soft-delete all queued/error jobs |
+| `POST` | `/queue/cleanup` | Delete orphaned files + purge deleted DB rows |
+| `POST` | `/queue/{id}/requeue` | Move any job back to queued |
+| `POST` | `/queue/{id}/send` | Immediately dispatch a specific job |
+| `GET` | `/queue/{id}/thumbnail` | PNG thumbnail extracted from the `.gcode.3mf` |
+| `DELETE` | `/queue/{id}` | Soft-delete a job (file kept until cleanup) |
+| `GET` | `/health` | Health check (no auth) |
 
 ### Job statuses
 
 | Status | Meaning |
 |---|---|
 | `queued` | Waiting to be sent |
-| `sending` | Currently being uploaded to printer |
-| `sent` | Successfully sent and print started |
-| `error` | Send failed — check the `error` field for detail |
-
----
-
-## IFS material mapping — important note
-
-The AD5X's IFS (Integrated Filament System) maps **slicer tool indices** to **physical IFS slots**.  
-This server assumes:
-
-```
-OrcaSlicer tool 0  →  IFS slot 1  (leftmost)
-OrcaSlicer tool 1  →  IFS slot 2
-OrcaSlicer tool 2  →  IFS slot 3
-OrcaSlicer tool 3  →  IFS slot 4
-```
-
-This matches what OrcaSlicer's own FlashForge upload does.  
-
-**If your spools are in a different physical order**, either:
-- Rearrange the spools on the IFS to match the expected order, **or**
-- Re-slice with the filament order in OrcaSlicer matching your physical spool order.
+| `sending` | Currently uploading to printer |
+| `sent` | Successfully sent, print started |
+| `error` | Send failed — see `error` field |
+| `deleted` | Soft-deleted, hidden by default |
 
 ---
 
 ## Environment variables
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `PRINTER_IP` | ✅ | — | AD5X local IP address |
-| `PRINTER_SERIAL` | ✅ | — | Serial number from LAN mode screen |
-| `PRINTER_CHECK_CODE` | ✅ | — | 8-digit check code from LAN mode screen |
-| `API_KEY` | — | (none) | API key for request authentication |
-| `LEVELING_BEFORE_PRINT` | — | `true` | Run ABL before each print |
-| `START_PRINT_IMMEDIATELY` | — | `true` | Start print immediately after upload |
-| `DATA_DIR` | — | `/data` | Directory for uploads and SQLite DB |
+| Variable | Required | Description |
+|---|---|---|
+| `PRINTER_IP` | ✅ | AD5X local IP address |
+| `PRINTER_SERIAL` | ✅ | Serial number from LAN mode screen |
+| `PRINTER_CHECK_CODE` | ✅ | Check code from LAN mode screen |
+| `DATA_DIR` | — | Storage directory (default: `./data` locally, `/data` in Docker) |
 
 ---
 
@@ -179,48 +152,57 @@ This matches what OrcaSlicer's own FlashForge upload does.
 
 ```
 printer-queue/
+├── .github/
+│   └── workflows/
+│       └── build.yml        # Build & push to GHCR on push to main
 ├── app/
 │   ├── __init__.py
-│   ├── config.py       # Environment-variable settings
-│   ├── db.py           # SQLite job queue
-│   ├── main.py         # FastAPI app (OctoPrint shim + queue endpoints)
-│   ├── printer.py      # FlashForge API client (flashforge-python-api)
-│   └── threemf.py      # .gcode.3mf metadata parser (IFS slot extraction)
+│   ├── config.py            # Environment variable settings
+│   ├── db.py                # SQLite queue store
+│   ├── main.py              # FastAPI app — proxy + queue endpoints
+│   ├── threemf.py           # .gcode.3mf parser (thumbnail, print time, layers)
+│   └── ui.html              # Self-contained React web UI (served at GET /)
+├── .dockerignore
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
+├── run.py                   # PyCharm / local dev entry point
 └── README.md
 ```
 
+### Storage (per job)
+
+Each upload creates two files under `DATA_DIR/uploads/`:
+
+| File | Purpose |
+|---|---|
+| `{id}.body` | Raw multipart body — replayed byte-for-byte to the printer |
+| `{id}.gcode.3mf` | Extracted 3mf file — used for thumbnails and metadata |
+
+The SQLite database (`DATA_DIR/queue.db`) stores all job metadata including material mappings, queue position, print time, layer count, and file size.
+
 ---
 
-## Updating
+## Building and deploying
+
+The GitHub Actions workflow (`.github/workflows/build.yml`) builds a multi-arch image (`linux/amd64` + `linux/arm64`) and pushes it to GHCR on every push to `main`.
+
+Tagged releases (`git tag v1.0.0 && git push --tags`) additionally publish versioned tags.
+
+To update a running server:
 
 ```bash
-docker compose pull   # or rebuild after code changes:
-docker compose build --no-cache
+docker compose pull
 docker compose up -d
 ```
 
-The SQLite database and uploaded files live in the `printer-queue-data` Docker volume and survive container updates.
+Data in the `printer-queue-data` volume survives container updates.
 
 ---
 
-## Troubleshooting
+## Local development (PyCharm)
 
-**OrcaSlicer "Test" button fails**  
-→ Check the server is running: `curl http://<server>:7125/health`  
-→ Confirm the URL in OrcaSlicer has no trailing slash and includes `http://`  
-→ Check the API key matches exactly
-
-**`POST /queue/next` returns 502**  
-→ Check printer is on and LAN mode is enabled  
-→ Verify `PRINTER_IP`, `PRINTER_SERIAL`, `PRINTER_CHECK_CODE` in docker-compose.yml  
-→ Run `docker compose logs printer-queue` to see the detailed error from the FlashForge API
-
-**IFS doesn't load the right spool**  
-→ See the "IFS material mapping" section above — rearrange physical spools to match the slicer tool order
-
-**File uploaded but not printing**  
-→ Check `START_PRINT_IMMEDIATELY=true` in your environment  
-→ Or press the Home Assistant button if you left it as `false` (manual mode)
+1. Set your run configuration to use `run.py` as the script
+2. Set working directory to the project root
+3. Add environment variables: `PRINTER_IP`, `PRINTER_SERIAL`, `PRINTER_CHECK_CODE`
+4. Run — the server starts on port 8898 with auto-reload
