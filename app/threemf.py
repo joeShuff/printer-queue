@@ -55,3 +55,43 @@ def _parse(xml: str) -> ThreeMFMeta:
         meta.total_layers = max(int(end) for _, end in ranges) + 1
 
     return meta
+
+
+def extract_thumbnail(filepath: str | Path) -> bytes | None:
+    """
+    Extract the plate thumbnail PNG from a .gcode.3mf archive.
+    OrcaSlicer stores it at Thumbnails/plate_1.png (from thumbnail_file key
+    in slice_info.config). Falls back to checking common alternative paths.
+    Returns raw PNG bytes or None if not found.
+    """
+    path = Path(filepath)
+    if ".3mf" not in path.name.lower():
+        return None
+
+    candidates = [
+        "Thumbnails/plate_1.png",
+        "Thumbnails/thumbnail.png",
+        "Metadata/plate_1.png",
+        "thumbnail.png",
+    ]
+
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            names_lower = {n.lower(): n for n in zf.namelist()}
+
+            # Prefer the path named in slice_info.config
+            slice_name = names_lower.get("metadata/slice_info.config")
+            if slice_name:
+                xml = zf.read(slice_name).decode("utf-8", errors="replace")
+                m = re.search(r'key=["\']thumbnail_file["\'][^>]*value=["\']([^"\']+)["\']', xml)
+                if m:
+                    candidates.insert(0, m.group(1))
+
+            for candidate in candidates:
+                actual = names_lower.get(candidate.lower())
+                if actual:
+                    return zf.read(actual)
+    except Exception:
+        pass
+
+    return None

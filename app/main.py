@@ -45,11 +45,11 @@ from typing import Any
 
 import aiohttp
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from . import db
 from .config import settings
-from .threemf import extract_meta
+from .threemf import extract_meta, extract_thumbnail
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
@@ -353,6 +353,21 @@ async def send_next_job() -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=job.get("error", "Printer error"))
 
     return {"success": True, "job": job}
+
+
+@app.get("/queue/{job_id}/thumbnail")
+async def job_thumbnail(job_id: int) -> Response:
+    """Return the plate thumbnail PNG extracted from the job's .gcode.3mf."""
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    gcode_path = job.get("gcode_path")
+    if not gcode_path:
+        raise HTTPException(status_code=404, detail="No file saved for this job")
+    png = extract_thumbnail(gcode_path)
+    if not png:
+        raise HTTPException(status_code=404, detail="No thumbnail in this file")
+    return Response(content=png, media_type="image/png")
 
 
 @app.delete("/queue/{job_id}")

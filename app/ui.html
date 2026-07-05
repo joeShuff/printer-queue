@@ -164,6 +164,8 @@
     // ── Job Card ─────────────────────────────────────────────────────────
     function JobCard({ job, onDelete, isNext }) {
       const mappings = job.material_mappings || [];
+      const thumbUrl = `${API}/queue/${job.id}/thumbnail`;
+      const [thumbOk, setThumbOk] = useState(true);
       return (
         <div className={`rounded-lg border transition-all duration-200
           ${isNext
@@ -192,13 +194,26 @@
             </div>
           </div>
 
-          <div className="px-4 py-3 flex flex-wrap gap-x-6 gap-y-2">
-            <Stat label="Size"    value={fmt_size(job.file_size)} mono />
-            <Stat label="Time"    value={fmt_time(job.printing_time)} mono />
-            <Stat label="Layers"  value={job.total_layers || "—"} mono />
-            <Stat label="Tools"   value={job.tool_count ?? "—"} mono />
-            <Stat label="Queued"  value={fmt_date(job.created_at)} />
-            {job.sent_at && <Stat label="Sent" value={fmt_date(job.sent_at)} />}
+          <div className="flex gap-4 px-4 py-3">
+            {/* Thumbnail */}
+            {thumbOk && (
+              <div className="shrink-0 w-24 h-24 rounded overflow-hidden border border-slate-700 bg-slate-900 flex items-center justify-center">
+                <img src={thumbUrl}
+                     alt="Model preview"
+                     className="w-full h-full object-contain"
+                     onError={() => setThumbOk(false)}/>
+              </div>
+            )}
+
+            {/* Stats */}
+            <div className="flex-1 flex flex-wrap gap-x-6 gap-y-2 content-start">
+              <Stat label="Size"    value={fmt_size(job.file_size)} mono />
+              <Stat label="Time"    value={fmt_time(job.printing_time)} mono />
+              <Stat label="Layers"  value={job.total_layers || "—"} mono />
+              <Stat label="Tools"   value={job.tool_count ?? "—"} mono />
+              <Stat label="Queued"  value={fmt_date(job.created_at)} />
+              {job.sent_at && <Stat label="Sent" value={fmt_date(job.sent_at)} />}
+            </div>
           </div>
 
           {mappings.length > 0 && (
@@ -305,7 +320,7 @@
       const errors  = jobs.filter(j => j.status === "error");
       const hasActive = queued.length > 0 || sending.length > 0;
       const nextId  = status?.next_job?.id;
-      const display = [...sending, ...errors, ...queued, ...sent];
+      const display = [...sending, ...errors, ...queued, ...[...sent].reverse()];
 
       return (
         <div className="min-h-screen" style={{background:"#0F1117",fontFamily:"'Inter',sans-serif"}}>
