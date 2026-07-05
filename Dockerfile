@@ -16,4 +16,4 @@ EXPOSE 7125
 
 # Run with a single worker — the printer client is async so this is fine.
 # Using a module path so imports work correctly.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7125"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8898"]
