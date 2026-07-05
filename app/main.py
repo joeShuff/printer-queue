@@ -339,6 +339,20 @@ async def queue_status() -> dict[str, Any]:
     }
 
 
+@app.post("/queue/reorder")
+async def reorder_queue(body: dict) -> dict[str, Any]:
+    """
+    Reorder queued jobs. Body: {"order": [id1, id2, id3, ...]}
+    The supplied list defines the new queue_position order, first = next to print.
+    Non-queued job IDs are silently ignored.
+    """
+    order = body.get("order", [])
+    if not isinstance(order, list) or not all(isinstance(i, int) for i in order):
+        raise HTTPException(status_code=422, detail="order must be a list of integers")
+    db.reorder_queue(order)
+    return {"reordered": True, "order": order}
+
+
 @app.post("/queue/next")
 async def send_next_job() -> dict[str, Any]:
     """Dispatch the next queued job to the printer. Called from Home Assistant."""

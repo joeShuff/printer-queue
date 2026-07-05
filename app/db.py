@@ -5,6 +5,8 @@ Each job stores:
   - Raw request headers + body path for byte-for-byte replay to the printer
   - UI metadata: filename, file size, material mappings, tool count, estimated
     print time, leveling flag — everything needed to build a queue UI
+  - queue_position (REAL): explicit ordering for queued jobs. Float so we can
+    insert between items cheaply. Sorted ascending; lowest = next to print.
 """
 import json
 import sqlite3
@@ -34,6 +36,8 @@ def get_conn() -> sqlite3.Connection:
                 sent_at         REAL,
                 error           TEXT,
 
+                queue_position  REAL    NOT NULL DEFAULT 0,
+
                 raw_headers     TEXT    NOT NULL,
                 body_path       TEXT    NOT NULL,
                 gcode_path      TEXT,
@@ -51,7 +55,30 @@ def get_conn() -> sqlite3.Connection:
             """
         )
         _conn.commit()
+        # Migration: add queue_position to existing DBs
+        cols = {r[1] for r in _conn.execute("PRAGMA table_info(jobs)")}
+        if "queue_position" not in cols:
+            _conn.execute("ALTER TABLE jobs ADD COLUMN queue_position REAL NOT NULL DEFAULT 0")
+            # Assign positions based on existing id order
+            rows = _conn.execute(
+                "SELECT id FROM jobs WHERE status = 'queued' ORDER BY id ASC"
+            ).fetchall()
+            for i, row in enumerate(rows):
+                _conn.execute(
+                    "UPDATE jobs SET queue_position = ? WHERE id = ?",
+                    (float(i + 1), row[0]),
+                )
+            _conn.commit()
     return _conn
+
+
+def _next_position(conn: sqlite3.Connection) -> float:
+    """Return a position value one step after the current last queued job."""
+    row = conn.execute(
+        "SELECT MAX(queue_position) FROM jobs WHERE status = 'queued'"
+    ).fetchone()
+    current_max = row[0] if row[0] is not None else 0.0
+    return current_max + 1.0
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
@@ -83,16 +110,18 @@ def add_job(
 ) -> dict[str, Any]:
     with _lock:
         conn = get_conn()
+        pos = _next_position(conn)
         cur = conn.execute(
             """INSERT INTO jobs (
-                status, created_at,
+                status, created_at, queue_position,
                 raw_headers, body_path, content_type,
                 filename, file_size, tool_count,
                 use_matl_station, leveling_before_print,
                 printing_time, total_layers, material_mappings
-               ) VALUES ('queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               ) VALUES ('queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 time.time(),
+                pos,
                 json.dumps(raw_headers),
                 body_path,
                 content_type,
@@ -144,13 +173,16 @@ def list_jobs(status: str | None = None, include_deleted: bool = False) -> list[
     conn = get_conn()
     if status:
         rows = conn.execute(
-            "SELECT * FROM jobs WHERE status = ? ORDER BY id ASC", (status,)
+            "SELECT * FROM jobs WHERE status = ? ORDER BY queue_position ASC, id ASC",
+            (status,),
         ).fetchall()
     elif include_deleted:
-        rows = conn.execute("SELECT * FROM jobs ORDER BY id ASC").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM jobs ORDER BY queue_position ASC, id ASC"
+        ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM jobs WHERE status != 'deleted' ORDER BY id ASC"
+            "SELECT * FROM jobs WHERE status != 'deleted' ORDER BY queue_position ASC, id ASC"
         ).fetchall()
     return [_row_to_dict(r) for r in rows]
 
@@ -158,9 +190,33 @@ def list_jobs(status: str | None = None, include_deleted: bool = False) -> list[
 def next_queued_job() -> dict[str, Any] | None:
     conn = get_conn()
     row = conn.execute(
-        "SELECT * FROM jobs WHERE status = 'queued' ORDER BY id ASC LIMIT 1"
+        "SELECT * FROM jobs WHERE status = 'queued' ORDER BY queue_position ASC, id ASC LIMIT 1"
     ).fetchone()
     return _row_to_dict(row) if row else None
+
+
+def reorder_queue(ordered_ids: list[int]) -> None:
+    """
+    Set queue_position for queued jobs based on the supplied ID order.
+    Only queued jobs are repositioned; non-queued IDs in the list are ignored.
+    Positions are assigned as 1.0, 2.0, 3.0 ... for clean integer values.
+    """
+    with _lock:
+        conn = get_conn()
+        queued_ids = {
+            r[0] for r in conn.execute(
+                "SELECT id FROM jobs WHERE status = 'queued'"
+            ).fetchall()
+        }
+        pos = 1.0
+        for job_id in ordered_ids:
+            if job_id in queued_ids:
+                conn.execute(
+                    "UPDATE jobs SET queue_position = ? WHERE id = ?",
+                    (pos, job_id),
+                )
+                pos += 1.0
+        conn.commit()
 
 
 def set_status(job_id: int, status: str, error: str | None = None) -> None:
@@ -180,19 +236,20 @@ def set_status(job_id: int, status: str, error: str | None = None) -> None:
 
 
 def requeue_job(job_id: int) -> bool:
-    """Reset any job back to queued so it can be sent again."""
+    """Reset any job back to queued at the end of the queue."""
     with _lock:
         conn = get_conn()
+        pos = _next_position(conn)
         cur = conn.execute(
-            "UPDATE jobs SET status = 'queued', sent_at = NULL, error = NULL WHERE id = ?",
-            (job_id,),
+            "UPDATE jobs SET status = 'queued', sent_at = NULL, error = NULL, queue_position = ? WHERE id = ?",
+            (pos, job_id),
         )
         conn.commit()
         return cur.rowcount > 0
 
 
 def delete_job(job_id: int) -> bool:
-    """Soft-delete a job (marks as deleted, file stays on disk)."""
+    """Soft-delete a job."""
     with _lock:
         conn = get_conn()
         cur = conn.execute("UPDATE jobs SET status = 'deleted' WHERE id = ?", (job_id,))
@@ -201,7 +258,7 @@ def delete_job(job_id: int) -> bool:
 
 
 def clear_queue() -> int:
-    """Soft-delete all queued/error jobs. Returns count affected."""
+    """Soft-delete all queued/error jobs."""
     with _lock:
         conn = get_conn()
         cur = conn.execute(
@@ -227,7 +284,7 @@ def active_file_paths() -> set[str]:
 
 
 def hard_delete_deleted_jobs() -> int:
-    """Permanently remove all soft-deleted rows. Call after files are cleaned up."""
+    """Permanently remove all soft-deleted rows."""
     with _lock:
         conn = get_conn()
         cur = conn.execute("DELETE FROM jobs WHERE status = 'deleted'")
