@@ -44,7 +44,7 @@ from typing import Any
 
 import aiohttp
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import db
 from .config import settings
@@ -367,6 +367,15 @@ async def cleanup() -> dict[str, Any]:
 # Health
 # ---------------------------------------------------------------------------
 
-@app.get("/health")
+@app.get("/", response_class=HTMLResponse)
+async def ui() -> HTMLResponse:
+    """Serve the queue management UI."""
+    ui_path = Path(__file__).parent / "ui.html"
+    if not ui_path.exists():
+        raise HTTPException(status_code=404, detail="UI not built. See ui.html.")
+    return HTMLResponse(ui_path.read_text())
+
+
+
 async def health() -> dict[str, str]:
     return {"status": "ok"}
