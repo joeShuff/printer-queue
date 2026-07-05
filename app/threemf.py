@@ -59,36 +59,39 @@ def _parse(xml: str) -> ThreeMFMeta:
 
 def extract_thumbnail(filepath: str | Path) -> bytes | None:
     """
-    Extract the plate thumbnail PNG from a .gcode.3mf archive.
-    OrcaSlicer stores it at Thumbnails/plate_1.png (from thumbnail_file key
-    in slice_info.config). Falls back to checking common alternative paths.
-    Returns raw PNG bytes or None if not found.
+    Extract the correct plate thumbnail PNG from a .gcode.3mf archive.
+
+    OrcaSlicer stores the active plate index in slice_info.config:
+      <metadata key="index" value="3"/>
+
+    Thumbnails are at Metadata/plate_N.png. We read the index and load
+    that specific plate's thumbnail, falling back to plate_1 if not found.
     """
     path = Path(filepath)
     if ".3mf" not in path.name.lower():
         return None
 
-    candidates = [
-        "Thumbnails/plate_1.png",
-        "Thumbnails/thumbnail.png",
-        "Metadata/plate_1.png",
-        "thumbnail.png",
-    ]
-
     try:
         with zipfile.ZipFile(path, "r") as zf:
             names_lower = {n.lower(): n for n in zf.namelist()}
 
-            # Prefer the path named in slice_info.config
+            # Read plate index from slice_info.config
+            plate_index = 1
             slice_name = names_lower.get("metadata/slice_info.config")
             if slice_name:
                 xml = zf.read(slice_name).decode("utf-8", errors="replace")
-                m = re.search(r'key=["\']thumbnail_file["\'][^>]*value=["\']([^"\']+)["\']', xml)
+                m = re.search(r'key=["\']index["\'][^>]*value=["\'](\d+)["\']', xml)
                 if m:
-                    candidates.insert(0, m.group(1))
+                    plate_index = int(m.group(1))
+
+            # Try the specific plate, then fall back down to plate_1
+            candidates = [f"metadata/plate_{plate_index}.png"]
+            if plate_index != 1:
+                candidates.append("metadata/plate_1.png")
+            candidates += ["thumbnails/plate_1.png", "thumbnails/thumbnail.png", "thumbnail.png"]
 
             for candidate in candidates:
-                actual = names_lower.get(candidate.lower())
+                actual = names_lower.get(candidate)
                 if actual:
                     return zf.read(actual)
     except Exception:
