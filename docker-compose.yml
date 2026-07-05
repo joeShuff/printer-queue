@@ -21,7 +21,7 @@ services:
       # Internal paths (no need to change)
       DATA_DIR: "/data"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8898/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8898/health')"]
       interval: 30s
       timeout: 5s
       retries: 3

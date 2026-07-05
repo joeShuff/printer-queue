@@ -12,8 +12,9 @@ COPY app/ ./app/
 # /data is the persistent volume mount point (uploads + sqlite db)
 VOLUME ["/data"]
 
-EXPOSE 7125
+EXPOSE 8898
 
-# Run with a single worker — the printer client is async so this is fine.
-# Using a module path so imports work correctly.
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8898/health')"
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8898"]
