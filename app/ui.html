@@ -317,7 +317,6 @@
         const [dragId, setDragId] = useState(null);
         const [overId, setOverId] = useState(null);
 
-        // Only queued jobs are draggable. Non-queued jobs render normally below.
         const nonQueued = display.filter(j => j.status !== "queued");
 
         function handleDragStart(e, id) {
@@ -359,7 +358,6 @@
 
         return (
             <div className="space-y-3">
-                {/* Draggable queued jobs */}
                 {queued.map(job => (
                     <div key={job.id}
                          draggable
@@ -373,7 +371,6 @@
                              ? "ring-2 ring-amber-400/60 ring-offset-2 ring-offset-slate-900"
                              : ""}`}>
                         <div className="flex items-stretch gap-0">
-                            {/* Drag handle */}
                             <div
                                 className="flex items-center px-2 cursor-grab active:cursor-grabbing text-slate-600 hover:text-slate-400 transition-colors shrink-0">
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -389,7 +386,6 @@
                     </div>
                 ))}
 
-                {/* Non-queued jobs — not draggable */}
                 {nonQueued.map(job => (
                     <JobCard key={job.id} job={job} onDelete={onDelete}
                              onRequeue={onRequeue} onSend={onSend} isNext={job.id === nextId}/>
@@ -401,7 +397,6 @@
     function EmptyQueue() {
         return (
             <div className="flex flex-col items-center justify-center py-20 text-center">
-
                 <svg className="w-12 h-12 text-slate-800 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
                           d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
@@ -507,14 +502,14 @@
         const hasActive = queued.length > 0 || sending.length > 0;
         const nextId = status?.next_job?.id;
         const display = [
-            ...sending, ...errors, ...queued, ...[...sent].reverse(),
+            ...sending, ...errors, ...queued,
+            ...[...sent].sort((a, b) => (b.sent_at ?? 0) - (a.sent_at ?? 0)),
             ...(showDeleted ? [...deleted].reverse() : []),
         ];
 
         return (
             <div className="min-h-screen" style={{background: "#0F1117", fontFamily: "'Inter',sans-serif"}}>
 
-                {/* Sticky header */}
                 <header
                     className="border-b border-slate-800 px-6 py-4 flex items-center justify-between sticky top-0 z-40"
                     style={{background: "rgba(15,17,23,0.95)", backdropFilter: "blur(8px)"}}>
@@ -547,7 +542,6 @@
 
                     <PrinterPanel printer={status?.printer} loading={loadingStatus}/>
 
-                    {/* Stats strip */}
                     <div className="flex items-center gap-3">
                         <div className="flex-1 grid grid-cols-4 gap-3">
                             {[
@@ -568,7 +562,6 @@
                             ))}
                         </div>
 
-                        {/* Show removed toggle */}
                         <button onClick={() => setShowDeleted(v => !v)}
                                 className={`shrink-0 rounded-lg border px-4 py-3 text-center transition-all min-w-[90px]
                         ${showDeleted
@@ -585,7 +578,6 @@
                         </button>
                     </div>
 
-                    {/* Job list */}
                     <QueueList
                         queued={queued}
                         display={display}

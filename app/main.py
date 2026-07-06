@@ -308,6 +308,33 @@ async def _dispatch_job(job: dict) -> None:
 @app.get("/queue")
 async def get_queue(include_deleted: bool = False) -> dict[str, Any]:
     jobs = db.list_jobs(include_deleted=include_deleted)
+
+    # Fetch live IFS slot colours from the printer and patch them into the
+    # material_mappings so the UI always shows the current filament colours,
+    # even if spools were swapped since the job was uploaded.
+    live_slots: dict[int, dict] = {}
+    if settings.PRINTER_IP:
+        try:
+            result = await _proxy("/detail", {
+                "serialNumber": settings.PRINTER_SERIAL,
+                "checkCode":    settings.PRINTER_CHECK_CODE,
+            })
+            for slot in result.get("detail", {}).get("matlStationInfo", {}).get("slotInfos", []):
+                slot_id = slot.get("slotIndex") or slot.get("slotId")
+                if slot_id is not None:
+                    live_slots[int(slot_id)] = slot
+        except Exception:
+            pass  # printer offline — return stored colours as-is
+
+    if live_slots:
+        for job in jobs:
+            mappings = job.get("material_mappings") or []
+            for m in mappings:
+                slot = live_slots.get(int(m.get("slotId", -1)))
+                if slot:
+                    m["slotMaterialColor"] = slot.get("materialColor", m.get("slotMaterialColor"))
+                    m["materialName"] = slot.get("materialType", m.get("materialName"))
+
     return {"jobs": jobs, "count": len(jobs)}
 
 
