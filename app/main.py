@@ -338,6 +338,64 @@ async def get_queue(include_deleted: bool = False) -> dict[str, Any]:
     return {"jobs": jobs, "count": len(jobs)}
 
 
+@app.get("/server/info")
+async def server_info(request: Request) -> dict[str, Any]:
+    """
+    Returns the connection details the user should enter in OrcaSlicer
+    (i.e. this proxy server's details, not the printer's).
+    """
+    host = request.headers.get("host", "").split(":")[0]
+    port = request.url.port or 8898
+    return {
+        "proxy": {
+            "host": host,
+            "port": port,
+            "serial": settings.PRINTER_SERIAL,
+            "check_code": settings.PRINTER_CHECK_CODE,
+        },
+        "printer": {
+            "ip": settings.PRINTER_IP,
+            "serial": settings.PRINTER_SERIAL,
+            "check_code": settings.PRINTER_CHECK_CODE,
+        },
+    }
+
+
+@app.post("/printer/control")
+async def printer_control(request: Request) -> JSONResponse:
+    """
+    Convenience endpoint for printer control commands.
+    Body: { "cmd": "jobCtl_cmd", "args": { "action": "pause" } }
+    Supported commands:
+      jobCtl_cmd          args: { action: pause | continue | cancel }
+      lightControl_cmd    args: { status: open | close }
+      printerCtl_cmd      args: { speed, zAxisCompensation, coolingFan, chamberFan }
+      temperatureCtl_cmd  args: { extruderTemp, bedTemp }
+    """
+    body = await request.json()
+    cmd = body.get("cmd")
+    args = body.get("args", {})
+    if not cmd:
+        raise HTTPException(status_code=422, detail="cmd is required")
+    result = await _proxy("/control", {
+        "serialNumber": settings.PRINTER_SERIAL,
+        "checkCode":    settings.PRINTER_CHECK_CODE,
+        "cmd":          cmd,
+        "args":         args,
+    })
+    return JSONResponse(result)
+
+
+@app.get("/printer/detail")
+async def printer_detail() -> JSONResponse:
+    """Return the full live /detail response from the printer."""
+    result = await _proxy("/detail", {
+        "serialNumber": settings.PRINTER_SERIAL,
+        "checkCode":    settings.PRINTER_CHECK_CODE,
+    })
+    return JSONResponse(result)
+
+
 @app.get("/queue/status")
 async def queue_status() -> dict[str, Any]:
     next_job = db.next_queued_job()
@@ -352,9 +410,33 @@ async def queue_status() -> dict[str, Any]:
             })
             detail = raw.get("detail", {})
             printer_state = {
-                "state":    detail.get("status", "unknown"),
-                "file":     detail.get("printFileName", ""),
-                "progress": detail.get("printProgress", 0),
+                "state":              detail.get("status", "unknown"),
+                "file":               detail.get("printFileName", ""),
+                "thumb_url":          detail.get("printFileThumbUrl", ""),
+                "progress":           detail.get("printProgress", 0),
+                "current_layer":      detail.get("printLayer", 0),
+                "total_layers":       detail.get("targetPrintLayer", 0),
+                "remaining_time":     detail.get("estimatedTime", 0),
+                "print_duration":     detail.get("printDuration", 0),
+                "nozzle_temp":        detail.get("rightTemp", 0),
+                "nozzle_target":      detail.get("rightTargetTemp", 0),
+                "bed_temp":           detail.get("platTemp", 0),
+                "bed_target":         detail.get("platTargetTemp", 0),
+                "chamber_temp":       detail.get("chamberTemp", 0),
+                "print_speed":        detail.get("printSpeedAdjust", 100),
+                "current_speed":      detail.get("currentPrintSpeed", 0),
+                "cooling_fan":        detail.get("coolingFanSpeed", 0),
+                "chamber_fan":        detail.get("chamberFanSpeed", 0),
+                "light":              detail.get("lightStatus", "close"),
+                "z_offset":           detail.get("zAxisCompensation", 0),
+                "error_code":         detail.get("errorCode", ""),
+                "door_open":          detail.get("doorStatus", "close") == "open",
+                "estimated_right_len": detail.get("estimatedRightLen", 0),
+                "cumulative_filament": detail.get("cumulativeFilament", 0),
+                "cumulative_time":    detail.get("cumulativePrintTime", 0),
+                "firmware":           detail.get("firmwareVersion", ""),
+                "current_slot":       detail.get("matlStationInfo", {}).get("currentSlot"),
+                "slot_infos":         detail.get("matlStationInfo", {}).get("slotInfos", []),
             }
         except HTTPException:
             printer_state = {"state": "offline"}
