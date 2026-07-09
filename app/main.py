@@ -365,12 +365,7 @@ async def server_info(request: Request) -> dict[str, Any]:
 async def printer_control(request: Request) -> JSONResponse:
     """
     Convenience endpoint for printer control commands.
-    Body: { "cmd": "jobCtl_cmd", "args": { "action": "pause" } }
-    Supported commands:
-      jobCtl_cmd          args: { action: pause | continue | cancel }
-      lightControl_cmd    args: { status: open | close }
-      printerCtl_cmd      args: { speed, zAxisCompensation, coolingFan, chamberFan }
-      temperatureCtl_cmd  args: { extruderTemp, bedTemp }
+    Body: { "cmd": "stateCtrl_cmd", "args": { "action": "setClearPlatform" } }
     """
     body = await request.json()
     cmd = body.get("cmd")
@@ -380,8 +375,10 @@ async def printer_control(request: Request) -> JSONResponse:
     result = await _proxy("/control", {
         "serialNumber": settings.PRINTER_SERIAL,
         "checkCode":    settings.PRINTER_CHECK_CODE,
-        "cmd":          cmd,
-        "args":         args,
+        "payload": {
+            "cmd":  cmd,
+            "args": args,
+        },
     })
     return JSONResponse(result)
 
