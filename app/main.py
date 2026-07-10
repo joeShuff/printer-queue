@@ -338,6 +338,30 @@ async def get_queue(include_deleted: bool = False) -> dict[str, Any]:
     return {"jobs": jobs, "count": len(jobs)}
 
 
+@app.get("/printer/thumbnail")
+async def printer_thumbnail() -> Response:
+    """
+    Proxy the current print thumbnail from the printer.
+    The printer serves it over plain HTTP which browsers block when the UI
+    is served over HTTPS (mixed content). This endpoint fetches it server-side
+    and re-serves it over the same HTTPS connection as the UI.
+    """
+    if not settings.PRINTER_IP:
+        raise HTTPException(status_code=404, detail="Printer not configured")
+    url = f"http://{settings.PRINTER_IP}:8898/getThum"
+    timeout = aiohttp.ClientTimeout(total=10)
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    raise HTTPException(status_code=404, detail="No thumbnail available")
+                data = await resp.read()
+                content_type = resp.headers.get("Content-Type", "image/jpeg")
+                return Response(content=data, media_type=content_type)
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach printer: {exc}")
+
+
 @app.get("/server/info")
 async def server_info(request: Request) -> dict[str, Any]:
     """
@@ -409,7 +433,7 @@ async def queue_status() -> dict[str, Any]:
             printer_state = {
                 "state":              detail.get("status", "unknown"),
                 "file":               detail.get("printFileName", ""),
-                "thumb_url":          detail.get("printFileThumbUrl", ""),
+                "thumb_url":          "/printer/thumbnail" if detail.get("printFileThumbUrl") else "",
                 "progress":           detail.get("printProgress", 0),
                 "current_layer":      detail.get("printLayer", 0),
                 "total_layers":       detail.get("targetPrintLayer", 0),
