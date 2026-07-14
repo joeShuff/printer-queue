@@ -47,14 +47,53 @@ import aiohttp
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
+from pydantic import BaseModel, Field
+
+# ---------------------------------------------------------------------------
+# Request / response models (used by OpenAPI docs)
+# ---------------------------------------------------------------------------
+
+class ControlRequest(BaseModel):
+    cmd: str = Field(..., example="jobCtl_cmd",
+                     description="Control command name")
+    args: dict = Field(default={}, example={"action": "pause"},
+                       description="Command arguments")
+
+class ReorderRequest(BaseModel):
+    order: list[int] = Field(..., example=[3, 1, 2],
+                             description="Job IDs in desired queue order (first = next to print)")
+
+# ---------------------------------------------------------------------------
+# Tags for grouping endpoints in Swagger UI
+# ---------------------------------------------------------------------------
+
+TAGS = [
+    {"name": "Queue",   "description": "Manage the print queue"},
+    {"name": "Printer", "description": "Live printer status and control"},
+    {"name": "Proxy",   "description": "FlashForge protocol endpoints proxied to the real printer — used by OrcaSlicer, not intended for direct use"},
+    {"name": "Utility", "description": "Health check and server info"},
+]
+
+from .threemf import extract_meta, extract_thumbnail
 from . import db
 from .config import settings
-from .threemf import extract_meta, extract_thumbnail
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
 
-app = FastAPI(title="FlashForge Printer Queue Proxy", version="2.0.0")
+app = FastAPI(
+    title="AD5X Print Queue",
+    version="2.0.0",
+    description="""
+A self-hosted print queue proxy for the FlashForge AD5X with IFS.
+
+OrcaSlicer connects to this server instead of the printer directly.
+Status and control requests are forwarded live to the real printer; uploads are intercepted and queued.
+
+Use `/queue/next` or per-job `/queue/{id}/send` to dispatch jobs when ready.
+""",
+    openapi_tags=TAGS,
+)
 
 PRINTER_BASE = f"http://{settings.PRINTER_IP}:8898"
 
@@ -95,7 +134,7 @@ def _decode_mappings(raw_b64: str) -> list:
 # Proxied endpoints
 # ---------------------------------------------------------------------------
 
-@app.post("/product")
+@app.post("/product", tags=["Proxy"], summary="Printer capabilities", include_in_schema=True)
 async def product(request: Request) -> JSONResponse:
     body = await request.json()
     if not _check_auth(body.get("serialNumber", ""), body.get("checkCode", "")):
@@ -103,7 +142,7 @@ async def product(request: Request) -> JSONResponse:
     return JSONResponse(await _proxy("/product", body))
 
 
-@app.post("/detail")
+@app.post("/detail", tags=["Proxy"], summary="Live printer status and IFS slot info")
 async def detail(request: Request) -> JSONResponse:
     body = await request.json()
     if not _check_auth(body.get("serialNumber", ""), body.get("checkCode", "")):
@@ -111,7 +150,7 @@ async def detail(request: Request) -> JSONResponse:
     return JSONResponse(await _proxy("/detail", body))
 
 
-@app.post("/control")
+@app.post("/control", tags=["Proxy"], summary="Raw control passthrough")
 async def control(request: Request) -> JSONResponse:
     body = await request.json()
     if not _check_auth(body.get("serialNumber", ""), body.get("checkCode", "")):
@@ -119,7 +158,7 @@ async def control(request: Request) -> JSONResponse:
     return JSONResponse(await _proxy("/control", body))
 
 
-@app.post("/gcodeList")
+@app.post("/gcodeList", tags=["Proxy"], summary="File list on printer")
 async def gcode_list(request: Request) -> JSONResponse:
     body = await request.json()
     if not _check_auth(body.get("serialNumber", ""), body.get("checkCode", "")):
@@ -127,7 +166,7 @@ async def gcode_list(request: Request) -> JSONResponse:
     return JSONResponse(await _proxy("/gcodeList", body))
 
 
-@app.post("/gcodeThumb")
+@app.post("/gcodeThumb", tags=["Proxy"], summary="Thumbnail from printer storage")
 async def gcode_thumb(request: Request) -> JSONResponse:
     body = await request.json()
     if not _check_auth(body.get("serialNumber", ""), body.get("checkCode", "")):
@@ -139,7 +178,7 @@ async def gcode_thumb(request: Request) -> JSONResponse:
 # Intercepted: /uploadGcode
 # ---------------------------------------------------------------------------
 
-@app.post("/uploadGcode")
+@app.post("/uploadGcode", tags=["Proxy"], summary="Intercept OrcaSlicer upload and queue the job")
 async def upload_gcode(request: Request) -> JSONResponse:
     """
     Save the raw multipart body to disk and record the job in the queue.
@@ -305,7 +344,7 @@ async def _dispatch_job(job: dict) -> None:
 # Queue management
 # ---------------------------------------------------------------------------
 
-@app.get("/queue")
+@app.get("/queue", tags=["Queue"], summary="List all jobs")
 async def get_queue(include_deleted: bool = False) -> dict[str, Any]:
     jobs = db.list_jobs(include_deleted=include_deleted)
 
@@ -338,7 +377,7 @@ async def get_queue(include_deleted: bool = False) -> dict[str, Any]:
     return {"jobs": jobs, "count": len(jobs)}
 
 
-@app.get("/printer/thumbnail")
+@app.get("/printer/thumbnail", tags=["Printer"], summary="Current print thumbnail (HTTPS-safe proxy)")
 async def printer_thumbnail() -> Response:
     """
     Proxy the current print thumbnail from the printer.
@@ -362,7 +401,7 @@ async def printer_thumbnail() -> Response:
         raise HTTPException(status_code=502, detail=f"Could not reach printer: {exc}")
 
 
-@app.get("/server/info")
+@app.get("/server/info", tags=["Utility"], summary="OrcaSlicer connection details for this proxy")
 async def server_info(request: Request) -> dict[str, Any]:
     """
     Returns the connection details the user should enter in OrcaSlicer
@@ -385,29 +424,34 @@ async def server_info(request: Request) -> dict[str, Any]:
     }
 
 
-@app.post("/printer/control")
-async def printer_control(request: Request) -> JSONResponse:
+@app.post("/printer/control", tags=["Printer"], summary="Send a control command to the printer")
+async def printer_control(body: ControlRequest) -> JSONResponse:
     """
-    Convenience endpoint for printer control commands.
-    Body: { "cmd": "stateCtrl_cmd", "args": { "action": "setClearPlatform" } }
+    Send a control command to the printer.
+
+    Common commands:
+
+    | cmd | args | Description |
+    |-----|------|-------------|
+    | `jobCtl_cmd` | `{"action": "pause"}` | Pause current print |
+    | `jobCtl_cmd` | `{"action": "continue"}` | Resume paused print |
+    | `jobCtl_cmd` | `{"action": "cancel"}` | Cancel current print |
+    | `stateCtrl_cmd` | `{"action": "setClearPlatform"}` | Confirm bed is empty |
+    | `lightControl_cmd` | `{"status": "open"}` | Turn light on |
+    | `lightControl_cmd` | `{"status": "close"}` | Turn light off |
     """
-    body = await request.json()
-    cmd = body.get("cmd")
-    args = body.get("args", {})
-    if not cmd:
-        raise HTTPException(status_code=422, detail="cmd is required")
     result = await _proxy("/control", {
         "serialNumber": settings.PRINTER_SERIAL,
         "checkCode":    settings.PRINTER_CHECK_CODE,
         "payload": {
-            "cmd":  cmd,
-            "args": args,
+            "cmd":  body.cmd,
+            "args": body.args,
         },
     })
     return JSONResponse(result)
 
 
-@app.get("/printer/detail")
+@app.get("/printer/detail", tags=["Printer"], summary="Full raw detail response from printer")
 async def printer_detail() -> JSONResponse:
     """Return the full live /detail response from the printer."""
     result = await _proxy("/detail", {
@@ -417,7 +461,7 @@ async def printer_detail() -> JSONResponse:
     return JSONResponse(result)
 
 
-@app.get("/queue/status")
+@app.get("/queue/status", tags=["Queue"], summary="Live printer state and next queued job")
 async def queue_status() -> dict[str, Any]:
     next_job = db.next_queued_job()
     queued_count = len(db.list_jobs(status="queued"))
@@ -469,21 +513,20 @@ async def queue_status() -> dict[str, Any]:
     }
 
 
-@app.post("/queue/reorder")
-async def reorder_queue(body: dict) -> dict[str, Any]:
+@app.post("/queue/reorder", tags=["Queue"], summary="Reorder queued jobs")
+async def reorder_queue(body: ReorderRequest) -> dict[str, Any]:
     """
-    Reorder queued jobs. Body: {"order": [id1, id2, id3, ...]}
-    The supplied list defines the new queue_position order, first = next to print.
-    Non-queued job IDs are silently ignored.
+    Supply a list of job IDs in the desired order — first ID will print next.
+    Only queued jobs are repositioned; other statuses are ignored.
     """
-    order = body.get("order", [])
+    order = body.order
     if not isinstance(order, list) or not all(isinstance(i, int) for i in order):
         raise HTTPException(status_code=422, detail="order must be a list of integers")
     db.reorder_queue(order)
     return {"reordered": True, "order": order}
 
 
-@app.post("/queue/next")
+@app.post("/queue/next", tags=["Queue"], summary="Send the next queued job to the printer")
 async def send_next_job() -> dict[str, Any]:
     """Dispatch the next queued job to the printer. Called from Home Assistant."""
     job = db.next_queued_job()
@@ -499,7 +542,7 @@ async def send_next_job() -> dict[str, Any]:
     return {"success": True, "job": job}
 
 
-@app.post("/queue/{job_id}/requeue")
+@app.post("/queue/{job_id}/requeue", tags=["Queue"], summary="Move a job back to queued")
 async def requeue_job(job_id: int) -> dict[str, Any]:
     """Move any job back to queued status so it will be picked up by Send Next."""
     job = db.get_job(job_id)
@@ -509,7 +552,7 @@ async def requeue_job(job_id: int) -> dict[str, Any]:
     return {"requeued": True, "job": db.get_job(job_id)}
 
 
-@app.post("/queue/{job_id}/send")
+@app.post("/queue/{job_id}/send", tags=["Queue"], summary="Immediately dispatch a specific job")
 async def send_specific_job(job_id: int) -> dict[str, Any]:
     """Immediately dispatch a specific job to the printer regardless of queue position or printer state."""
     job = db.get_job(job_id)
@@ -531,7 +574,7 @@ async def send_specific_job(job_id: int) -> dict[str, Any]:
     return {"success": True, "job": job}
 
 
-@app.get("/queue/{job_id}/thumbnail")
+@app.get("/queue/{job_id}/thumbnail", tags=["Queue"], summary="Thumbnail extracted from the job 3MF")
 async def job_thumbnail(job_id: int) -> Response:
     """Return the plate thumbnail PNG extracted from the job's .gcode.3mf."""
     job = db.get_job(job_id)
@@ -546,7 +589,7 @@ async def job_thumbnail(job_id: int) -> Response:
     return Response(content=png, media_type="image/png")
 
 
-@app.delete("/queue/{job_id}")
+@app.delete("/queue/{job_id}", tags=["Queue"], summary="Soft-delete a job")
 async def delete_job(job_id: int) -> dict[str, Any]:
     job = db.get_job(job_id)
     if not job:
@@ -555,14 +598,14 @@ async def delete_job(job_id: int) -> dict[str, Any]:
     return {"deleted": True, "job_id": job_id}
 
 
-@app.post("/queue/clear")
+@app.post("/queue/clear", tags=["Queue"], summary="Soft-delete all queued and errored jobs")
 async def clear_queue() -> dict[str, Any]:
     """Soft-delete all queued (and errored) jobs that haven't been sent."""
     count = db.clear_queue()
     return {"cleared": count}
 
 
-@app.post("/queue/cleanup")
+@app.post("/queue/cleanup", tags=["Queue"], summary="Purge deleted rows and orphaned files from disk")
 async def cleanup() -> dict[str, Any]:
     """
     Delete body files on disk no longer referenced by active jobs,
@@ -594,7 +637,7 @@ async def cleanup() -> dict[str, Any]:
 # Health
 # ---------------------------------------------------------------------------
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse, tags=["Utility"], summary="Web UI", include_in_schema=False)
 async def ui() -> HTMLResponse:
     """Serve the queue management UI."""
     ui_path = Path(__file__).parent / "ui.html"
@@ -604,5 +647,6 @@ async def ui() -> HTMLResponse:
 
 
 
+@app.get("/health", tags=["Utility"], summary="Health check")
 async def health() -> dict[str, str]:
     return {"status": "ok"}

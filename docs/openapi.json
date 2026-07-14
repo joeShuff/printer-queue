@@ -1,0 +1,735 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AD5X Print Queue",
+    "description": "\nA self-hosted print queue proxy for the FlashForge AD5X with IFS.\n\nOrcaSlicer connects to this server instead of the printer directly.\nStatus and control requests are forwarded live to the real printer; uploads are intercepted and queued.\n\nUse `/queue/next` or per-job `/queue/{id}/send` to dispatch jobs when ready.\n",
+    "version": "2.0.0"
+  },
+  "paths": {
+    "/product": {
+      "post": {
+        "tags": [
+          "Proxy"
+        ],
+        "summary": "Printer capabilities",
+        "operationId": "product_product_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/detail": {
+      "post": {
+        "tags": [
+          "Proxy"
+        ],
+        "summary": "Live printer status and IFS slot info",
+        "operationId": "detail_detail_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/control": {
+      "post": {
+        "tags": [
+          "Proxy"
+        ],
+        "summary": "Raw control passthrough",
+        "operationId": "control_control_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/gcodeList": {
+      "post": {
+        "tags": [
+          "Proxy"
+        ],
+        "summary": "File list on printer",
+        "operationId": "gcode_list_gcodeList_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/gcodeThumb": {
+      "post": {
+        "tags": [
+          "Proxy"
+        ],
+        "summary": "Thumbnail from printer storage",
+        "operationId": "gcode_thumb_gcodeThumb_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/uploadGcode": {
+      "post": {
+        "tags": [
+          "Proxy"
+        ],
+        "summary": "Intercept OrcaSlicer upload and queue the job",
+        "description": "Save the raw multipart body to disk and record the job in the queue.\nNothing is forwarded to the printer yet.",
+        "operationId": "upload_gcode_uploadGcode_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/queue": {
+      "get": {
+        "tags": [
+          "Queue"
+        ],
+        "summary": "List all jobs",
+        "operationId": "get_queue_queue_get",
+        "parameters": [
+          {
+            "name": "include_deleted",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Deleted"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Queue Queue Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/printer/thumbnail": {
+      "get": {
+        "tags": [
+          "Printer"
+        ],
+        "summary": "Current print thumbnail (HTTPS-safe proxy)",
+        "description": "Proxy the current print thumbnail from the printer.\nThe printer serves it over plain HTTP which browsers block when the UI\nis served over HTTPS (mixed content). This endpoint fetches it server-side\nand re-serves it over the same HTTPS connection as the UI.",
+        "operationId": "printer_thumbnail_printer_thumbnail_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/server/info": {
+      "get": {
+        "tags": [
+          "Utility"
+        ],
+        "summary": "OrcaSlicer connection details for this proxy",
+        "description": "Returns the connection details the user should enter in OrcaSlicer\n(i.e. this proxy server's details, not the printer's).",
+        "operationId": "server_info_server_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Server Info Server Info Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/printer/control": {
+      "post": {
+        "tags": [
+          "Printer"
+        ],
+        "summary": "Send a control command to the printer",
+        "description": "Send a control command to the printer.\n\nCommon commands:\n\n| cmd | args | Description |\n|-----|------|-------------|\n| `jobCtl_cmd` | `{\"action\": \"pause\"}` | Pause current print |\n| `jobCtl_cmd` | `{\"action\": \"continue\"}` | Resume paused print |\n| `jobCtl_cmd` | `{\"action\": \"cancel\"}` | Cancel current print |\n| `stateCtrl_cmd` | `{\"action\": \"setClearPlatform\"}` | Confirm bed is empty |\n| `lightControl_cmd` | `{\"status\": \"open\"}` | Turn light on |\n| `lightControl_cmd` | `{\"status\": \"close\"}` | Turn light off |",
+        "operationId": "printer_control_printer_control_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/printer/detail": {
+      "get": {
+        "tags": [
+          "Printer"
+        ],
+        "summary": "Full raw detail response from printer",
+        "description": "Return the full live /detail response from the printer.",
+        "operationId": "printer_detail_printer_detail_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/queue/status": {
+      "get": {
+        "tags": [
+          "Queue"
+        ],
+        "summary": "Live printer state and next queued job",
+        "operationId": "queue_status_queue_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Queue Status Queue Status Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/queue/reorder": {
+      "post": {
+        "tags": [
+          "Queue"
+        ],
+        "summary": "Reorder queued jobs",
+        "description": "Supply a list of job IDs in the desired order \u2014 first ID will print next.\nOnly queued jobs are repositioned; other statuses are ignored.",
+        "operationId": "reorder_queue_queue_reorder_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Reorder Queue Queue Reorder Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/queue/next": {
+      "post": {
+        "tags": [
+          "Queue"
+        ],
+        "summary": "Send the next queued job to the printer",
+        "description": "Dispatch the next queued job to the printer. Called from Home Assistant.",
+        "operationId": "send_next_job_queue_next_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Send Next Job Queue Next Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/queue/{job_id}/requeue": {
+      "post": {
+        "tags": [
+          "Queue"
+        ],
+        "summary": "Move a job back to queued",
+        "description": "Move any job back to queued status so it will be picked up by Send Next.",
+        "operationId": "requeue_job_queue__job_id__requeue_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Requeue Job Queue  Job Id  Requeue Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/queue/{job_id}/send": {
+      "post": {
+        "tags": [
+          "Queue"
+        ],
+        "summary": "Immediately dispatch a specific job",
+        "description": "Immediately dispatch a specific job to the printer regardless of queue position or printer state.",
+        "operationId": "send_specific_job_queue__job_id__send_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Send Specific Job Queue  Job Id  Send Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/queue/{job_id}/thumbnail": {
+      "get": {
+        "tags": [
+          "Queue"
+        ],
+        "summary": "Thumbnail extracted from the job 3MF",
+        "description": "Return the plate thumbnail PNG extracted from the job's .gcode.3mf.",
+        "operationId": "job_thumbnail_queue__job_id__thumbnail_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/queue/{job_id}": {
+      "delete": {
+        "tags": [
+          "Queue"
+        ],
+        "summary": "Soft-delete a job",
+        "operationId": "delete_job_queue__job_id__delete",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Job Queue  Job Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/queue/clear": {
+      "post": {
+        "tags": [
+          "Queue"
+        ],
+        "summary": "Soft-delete all queued and errored jobs",
+        "description": "Soft-delete all queued (and errored) jobs that haven't been sent.",
+        "operationId": "clear_queue_queue_clear_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Clear Queue Queue Clear Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/queue/cleanup": {
+      "post": {
+        "tags": [
+          "Queue"
+        ],
+        "summary": "Purge deleted rows and orphaned files from disk",
+        "description": "Delete body files on disk no longer referenced by active jobs,\nthen hard-purge deleted rows from the DB.",
+        "operationId": "cleanup_queue_cleanup_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Cleanup Queue Cleanup Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "Utility"
+        ],
+        "summary": "Health check",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ControlRequest": {
+        "properties": {
+          "cmd": {
+            "type": "string",
+            "title": "Cmd",
+            "description": "Control command name",
+            "example": "jobCtl_cmd"
+          },
+          "args": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Args",
+            "description": "Command arguments",
+            "default": {},
+            "example": {
+              "action": "pause"
+            }
+          }
+        },
+        "type": "object",
+        "required": [
+          "cmd"
+        ],
+        "title": "ControlRequest"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ReorderRequest": {
+        "properties": {
+          "order": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Order",
+            "description": "Job IDs in desired queue order (first = next to print)",
+            "example": [
+              3,
+              1,
+              2
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "order"
+        ],
+        "title": "ReorderRequest"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Queue",
+      "description": "Manage the print queue"
+    },
+    {
+      "name": "Printer",
+      "description": "Live printer status and control"
+    },
+    {
+      "name": "Proxy",
+      "description": "FlashForge protocol endpoints proxied to the real printer \u2014 used by OrcaSlicer, not intended for direct use"
+    },
+    {
+      "name": "Utility",
+      "description": "Health check and server info"
+    }
+  ]
+}
