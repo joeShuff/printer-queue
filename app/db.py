@@ -248,6 +248,28 @@ def requeue_job(job_id: int) -> bool:
         return cur.rowcount > 0
 
 
+def update_raw_headers(job_id: int, raw_headers: dict) -> None:
+    with _lock:
+        conn = get_conn()
+        conn.execute(
+            "UPDATE jobs SET raw_headers = ? WHERE id = ?",
+            (json.dumps(raw_headers), job_id),
+        )
+        conn.commit()
+
+
+def update_material_mappings(job_id: int, material_mappings: list) -> bool:
+    """Update the material mappings for a queued job."""
+    with _lock:
+        conn = get_conn()
+        cur = conn.execute(
+            "UPDATE jobs SET material_mappings = ? WHERE id = ? AND status = 'queued'",
+            (json.dumps(material_mappings), job_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
 def delete_job(job_id: int) -> bool:
     """Soft-delete a job."""
     with _lock:

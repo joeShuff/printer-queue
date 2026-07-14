@@ -542,6 +542,42 @@ async def send_next_job() -> dict[str, Any]:
     return {"success": True, "job": job}
 
 
+class UpdateMappingsRequest(BaseModel):
+    material_mappings: list = Field(..., description="Updated material mappings list")
+
+
+@app.post("/queue/{job_id}/mappings", tags=["Queue"], summary="Update material mappings for a queued job")
+async def update_mappings(job_id: int, body: UpdateMappingsRequest) -> dict[str, Any]:
+    """
+    Update the IFS slot assignments for a queued job before it's sent.
+
+    materialMappings is stored as a base64 header in raw_headers — we update
+    that so the correct mappings are used when the job is dispatched.
+    """
+    job = db.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["status"] != "queued":
+        raise HTTPException(status_code=400, detail="Can only update mappings on queued jobs")
+
+    mappings = body.material_mappings
+
+    # Update the DB record
+    if not db.update_material_mappings(job_id, mappings):
+        raise HTTPException(status_code=400, detail="Failed to update — job may no longer be queued")
+
+    # Also update the materialMappings header in raw_headers so dispatch
+    # sends the correct value (it re-encodes from the DB mappings anyway,
+    # but keep raw_headers consistent)
+    raw_headers = job.get("raw_headers") or {}
+    raw_headers["materialmappings"] = base64.b64encode(
+        json.dumps(mappings).encode()
+    ).decode()
+    db.update_raw_headers(job_id, raw_headers)
+
+    return {"updated": True, "job": db.get_job(job_id)}
+
+
 @app.post("/queue/{job_id}/requeue", tags=["Queue"], summary="Move a job back to queued")
 async def requeue_job(job_id: int) -> dict[str, Any]:
     """Move any job back to queued status so it will be picked up by Send Next."""
