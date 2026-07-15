@@ -1,41 +1,96 @@
-# AD5X Printer Queue
+<!--
+  ⚠️ AI-Assisted Project
+  This project was developed with the assistance of Claude (Anthropic).
+  All code has been reviewed, tested, and modified by a professional developer.
+  Use at your own risk — always review code before deploying to your network.
+-->
 
-A self-hosted print queue server for the FlashForge AD5X (with IFS).
-Upload sliced jobs from OrcaSlicer, manage them via a web UI, then trigger prints manually or automatically from Home Assistant.
+# 🖨️ AD5X Print Queue
+
+A self-hosted print queue server for the **FlashForge AD5X** with IFS (Integrated Filament System).
+
+Upload sliced jobs directly from OrcaSlicer, manage them from a web UI, and print them when you're ready — without leaving OrcaSlicer open or babysitting the printer.
+
+> **AI Disclosure:** This project was developed with AI assistance (Claude by Anthropic). All code has been reviewed, tested, and modified by a professional developer before deployment.
+
+📖 **[API Documentation](https://joeshuff.github.io/printer-queue)** — full endpoint reference via Swagger UI
+
+---
+
+## Screenshots
+
+### Web UI — Queue overview
+<!-- screenshot: screenshots/queue-overview.png -->
+> _Screenshot: main queue view showing queued jobs, thumbnails, and stats strip_
+
+### Web UI — Printer panel (printing)
+<!-- screenshot: screenshots/printer-panel-printing.png -->
+> _Screenshot: printer panel with active print, thumbnail, progress bar, and controls_
+
+### Web UI — Printer panel (expanded)
+<!-- screenshot: screenshots/printer-panel-expanded.png -->
+> _Screenshot: expanded printer panel showing all four IFS slots and extra stats_
+
+### Web UI — Connection modal
+<!-- screenshot: screenshots/connection-modal.png -->
+> _Screenshot: OrcaSlicer connection details modal_
+
+### OrcaSlicer — Device tab
+<!-- screenshot: screenshots/orcaslicer-device-tab.png -->
+> _Screenshot: the Device tab in OrcaSlicer showing live printer status via the proxy_
 
 ---
 
 ## How it works
 
 ```
-OrcaSlicer  ──/uploadGcode──►  Queue server  ──FlashForge HTTP API──►  AD5X
-                                    ▲
-                  POST /queue/next  │
-                               Home Assistant / Web UI
+OrcaSlicer ──/uploadGcode──► Queue server ──FlashForge HTTP API──► AD5X
+                                   │
+                                Web UI
 ```
 
-The server acts as a **transparent proxy** — OrcaSlicer thinks it's talking directly to the printer. Status and IFS slot queries are forwarded live to the real printer so the material picker in OrcaSlicer shows your actual loaded spools. Uploads are intercepted and queued instead of being sent immediately.
+The server acts as a **transparent proxy** between OrcaSlicer and your printer:
+
+- **Status queries** are forwarded live — OrcaSlicer's IFS material picker shows your actual loaded spools
+- **Uploads** are intercepted, saved to disk, and queued — nothing prints yet
+- **Dispatch** replays the original upload to the printer, preserving all material mappings you selected in OrcaSlicer
+- **Auto-dispatch** fires immediately if the printer is idle when you hit Print
 
 ---
 
-## Quick start
+## Features
 
-### 1. Configure and start the container
+- 🖨️ **Transparent FlashForge proxy** — OrcaSlicer connects as if talking directly to the printer
+- 🎨 **Live IFS slot picker** — real filament colours and types from the printer, not cached data
+- 📋 **Drag-to-reorder queue** — reorganise jobs before they print
+- 🖼️ **Model thumbnails** — extracted from `.gcode.3mf`, correct plate selected automatically
+- ✏️ **Change filament** — reassign IFS slots on queued jobs before dispatch
+- ⏸️ **Printer controls** — pause, resume, cancel, clear platform, light toggle
+- 📱 **Mobile-friendly UI** — responsive layout
+- 🔄 **Per-job actions** — Send Now, Requeue, Remove
+- 🐳 **Docker** — single container, multi-arch (`amd64` + `arm64`)
+
+---
+
+## Requirements
+
+- Docker + Docker Compose
+- FlashForge AD5X with LAN mode enabled
+- OrcaSlicer 2.4.1+
+- A static IP assigned to the printer on your LAN
+
+---
+
+## Installation
+
+### 1. Clone the repo
 
 ```bash
 git clone https://github.com/joeShuff/printer-queue.git
 cd printer-queue
-
-# Edit docker-compose.yml with your printer IP, serial, and check code
-nano docker-compose.yml
-
-docker compose up -d
-docker compose logs -f
 ```
 
-The service listens on **port 8898** — the same port OrcaSlicer expects for FlashForge printers.
-
-### 2. Get your printer credentials
+### 2. Find your printer credentials
 
 On the AD5X touchscreen:
 
@@ -43,39 +98,9 @@ On the AD5X touchscreen:
 Settings → Network → LAN Mode → Enable
 ```
 
-Note the **Serial Number** and **Check Code**. Assign the printer a static IP in your router.
+Note the **Serial Number** and **Check Code**. Set a static IP for the printer in your router's DHCP settings.
 
-### 3. Configure OrcaSlicer
-
-In OrcaSlicer, open your **Printer settings → General** and set the connection type to **FlashForge** (not OctoPrint):
-
-| Field | Value |
-|---|---|
-| IP Address | your queue server's IP |
-| Port | 8898 |
-| Serial Number | same as `PRINTER_SERIAL` env var |
-| Check Code | same as `PRINTER_CHECK_CODE` env var |
-
-Click **Test** — OrcaSlicer will connect to the queue server, which proxies the request to the real printer. The IFS slot picker will show your actual loaded filaments.
-
-When you click **Print**, the file is queued rather than sent immediately (unless the printer is idle and `printNow` is set, in which case it auto-dispatches).
-
-### 4. Web UI
-
-Visit `http://<server-ip>:8898` in your browser for the queue management UI.
-
-Features:
-- Live printer status with progress bar
-- Queue stats (queued / sending / sent / errors / removed)
-- Model thumbnail previews extracted from the `.gcode.3mf`
-- Drag-to-reorder queued jobs
-- Per-job buttons: **Send Now**, **Requeue**, **Remove**
-- Toggle to show soft-deleted jobs
-- **Send Next**, **Clear Queue**, and **Purge** global actions
-
----
-
-## Docker Compose
+### 3. Configure docker-compose.yml
 
 ```yaml
 services:
@@ -87,64 +112,87 @@ services:
       - printer-queue-data:/data
     environment:
       PRINTER_IP: "192.168.1.XXX"
-      PRINTER_SERIAL: "YOUR_SERIAL"
-      PRINTER_CHECK_CODE: "YOUR_CODE"
+      PRINTER_SERIAL: "SNXXXXXXXX"
+      PRINTER_CHECK_CODE: "xxxxxxxx"
+      DATA_DIR: "/data"
 
 volumes:
   printer-queue-data:
 ```
 
+### 4. Start the container
+
+```bash
+docker compose up -d
+docker compose logs -f
+```
+
+### 5. Verify
+
+Open `http://<server-ip>:8898` — you should see the queue UI.
+
 ---
 
-## API reference
+## Connecting OrcaSlicer
 
-### Proxied to printer (live)
+> Point OrcaSlicer at this proxy server, **not** directly at the printer.
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/product` | Printer capabilities |
-| `POST` | `/detail` | Live status + IFS slot info |
-| `POST` | `/control` | Pause / resume / cancel |
-| `POST` | `/gcodeList` | File list on printer |
-| `POST` | `/gcodeThumb` | Thumbnail from printer |
+1. In OrcaSlicer open **Printer settings → General**
+2. Set connection type to **FlashForge**
+3. Click the **Connect** button in the queue UI header — it shows the exact values to enter:
 
-### Queue management
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/` | Web UI |
-| `GET` | `/queue` | List jobs (`?include_deleted=true` to show removed) |
-| `GET` | `/queue/status` | Live printer state + next queued job |
-| `POST` | `/queue/next` | Send next queued job to printer |
-| `POST` | `/queue/reorder` | Reorder queue — body: `{"order": [id1, id2, ...]}` |
-| `POST` | `/queue/clear` | Soft-delete all queued/error jobs |
-| `POST` | `/queue/cleanup` | Delete orphaned files + purge deleted DB rows |
-| `POST` | `/queue/{id}/requeue` | Move any job back to queued |
-| `POST` | `/queue/{id}/send` | Immediately dispatch a specific job |
-| `GET` | `/queue/{id}/thumbnail` | PNG thumbnail extracted from the `.gcode.3mf` |
-| `DELETE` | `/queue/{id}` | Soft-delete a job (file kept until cleanup) |
-| `GET` | `/health` | Health check (no auth) |
-
-### Job statuses
-
-| Status | Meaning |
+| Field | Value |
 |---|---|
-| `queued` | Waiting to be sent |
-| `sending` | Currently uploading to printer |
-| `sent` | Successfully sent, print started |
-| `error` | Send failed — see `error` field |
-| `deleted` | Soft-deleted, hidden by default |
+| IP Address | IP of the machine running the queue server |
+| Port | `8898` |
+| Serial Number | same as `PRINTER_SERIAL` in docker-compose |
+| Check Code | same as `PRINTER_CHECK_CODE` in docker-compose |
+
+4. Click **Test** in OrcaSlicer
+5. Open the **Device** tab in OrcaSlicer to see live printer status
+
+---
+
+## Uploading a job
+
+<!-- screenshot: screenshots/orcaslicer-send.png -->
+> _Screenshot: OrcaSlicer IFS material picker_
+
+1. Slice your model as normal
+2. Click **Print** — the IFS material picker shows your live loaded spools
+3. Assign each slicer tool to the correct physical IFS slot
+4. Click **Send** — the file is added to the queue
+
+---
+
+## Changing filament assignments
+
+<!-- screenshot: screenshots/filament-picker.png -->
+> _Screenshot: filament picker modal showing live IFS slot colours_
+
+Click **Filament** on any queued multi-tool job to open the picker. It shows your currently loaded spools (fetched live from the printer) and lets you reassign which physical slot each slicer tool uses. Save before dispatching.
+
+---
+
+## API
+
+📖 **[Interactive API docs](https://joeshuff.github.io/printer-queue)** — Swagger UI with full endpoint reference, request/response schemas, and control command examples.
+
+Also available on your running server at:
+- `/docs` — Swagger UI (interactive)
+- `/redoc` — ReDoc
+- `/openapi.json` — raw OpenAPI spec
 
 ---
 
 ## Environment variables
 
-| Variable | Required | Description |
-|---|---|---|
-| `PRINTER_IP` | ✅ | AD5X local IP address |
-| `PRINTER_SERIAL` | ✅ | Serial number from LAN mode screen |
-| `PRINTER_CHECK_CODE` | ✅ | Check code from LAN mode screen |
-| `DATA_DIR` | — | Storage directory (default: `./data` locally, `/data` in Docker) |
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `PRINTER_IP` | ✅ | — | AD5X local IP address |
+| `PRINTER_SERIAL` | ✅ | — | Serial number from LAN mode screen |
+| `PRINTER_CHECK_CODE` | ✅ | — | Check code from LAN mode screen |
+| `DATA_DIR` | — | `./data` / `/data` in Docker | Storage directory |
 
 ---
 
@@ -152,57 +200,52 @@ volumes:
 
 ```
 printer-queue/
-├── .github/
-│   └── workflows/
-│       └── build.yml        # Build & push to GHCR on push to main
 ├── app/
-│   ├── __init__.py
-│   ├── config.py            # Environment variable settings
-│   ├── db.py                # SQLite queue store
-│   ├── main.py              # FastAPI app — proxy + queue endpoints
-│   ├── threemf.py           # .gcode.3mf parser (thumbnail, print time, layers)
-│   └── ui.html              # Self-contained React web UI (served at GET /)
-├── .dockerignore
+│   ├── config.py       # Environment variable settings
+│   ├── db.py           # SQLite queue store
+│   ├── main.py         # FastAPI application
+│   ├── threemf.py      # .gcode.3mf metadata + thumbnail extractor
+│   └── ui.html         # Self-contained React UI (served at GET /)
+├── docs/
+│   ├── index.html      # GitHub Pages — Swagger UI
+│   └── openapi.json    # Generated OpenAPI spec
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
-├── run.py                   # PyCharm / local dev entry point
-└── README.md
+└── run.py              # Local dev entry point
 ```
-
-### Storage (per job)
-
-Each upload creates two files under `DATA_DIR/uploads/`:
-
-| File | Purpose |
-|---|---|
-| `{id}.body` | Raw multipart body — replayed byte-for-byte to the printer |
-| `{id}.gcode.3mf` | Extracted 3mf file — used for thumbnails and metadata |
-
-The SQLite database (`DATA_DIR/queue.db`) stores all job metadata including material mappings, queue position, print time, layer count, and file size.
 
 ---
 
-## Building and deploying
-
-The GitHub Actions workflow (`.github/workflows/build.yml`) builds a multi-arch image (`linux/amd64` + `linux/arm64`) and pushes it to GHCR on every push to `main`.
-
-Tagged releases (`git tag v1.0.0 && git push --tags`) additionally publish versioned tags.
-
-To update a running server:
+## Local development
 
 ```bash
-docker compose pull
-docker compose up -d
+git clone https://github.com/yourname/printer-queue.git
+cd printer-queue
+pip install -r requirements.txt
+
+export PRINTER_IP=192.168.1.XXX
+export PRINTER_SERIAL=SNXXXXXXXX
+export PRINTER_CHECK_CODE=xxxxxxxx
+
+python run.py
 ```
 
-Data in the `printer-queue-data` volume survives container updates.
+In PyCharm: script `run.py`, working directory = project root, add the three env vars.
 
 ---
 
-## Local development (PyCharm)
+## Contributing
 
-1. Set your run configuration to use `run.py` as the script
-2. Set working directory to the project root
-3. Add environment variables: `PRINTER_IP`, `PRINTER_SERIAL`, `PRINTER_CHECK_CODE`
-4. Run — the server starts on port 8898 with auto-reload
+Issues and PRs welcome. Keep it small.
+
+---
+
+## Licence
+
+Licensed under the **GNU Affero General Public Licence v3.0 (AGPL-3.0)**.
+
+- ✅ Free to use, modify, and self-host
+- ⚠️ Modified versions run as a network service must publish their source under the same licence
+
+See [choosealicense.com/licenses/agpl-3.0](https://choosealicense.com/licenses/agpl-3.0/) for a plain-English summary.
