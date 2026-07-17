@@ -593,6 +593,21 @@ function PrinterPanel({
 
         {expanded && (
           <div style={{borderTop:`1px solid ${C.border}`}}>
+            {/* Camera feed */}
+            {printer?.has_camera && (
+              <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`}}>
+                <div style={{fontSize:11,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:10}}>Camera</div>
+                <div style={{
+                  borderRadius:8,overflow:"hidden",background:"#000",
+                  border:`1px solid ${C.border}`,lineHeight:0,
+                }}>
+                  <img src={`${API}/printer/stream`}
+                       alt="Printer camera"
+                       style={{width:"100%",display:"block",maxHeight:300,objectFit:"contain"}}
+                       onError={e => e.target.parentElement.style.display="none"}/>
+                </div>
+              </div>
+            )}
             {/* IFS slots */}
             {slotInfos.length > 0 && (
               <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`}}>

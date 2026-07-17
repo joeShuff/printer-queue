@@ -45,7 +45,7 @@ from typing import Any
 
 import aiohttp
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from pydantic import BaseModel, Field
 
@@ -377,7 +377,124 @@ async def get_queue(include_deleted: bool = False) -> dict[str, Any]:
     return {"jobs": jobs, "count": len(jobs)}
 
 
-@app.get("/printer/thumbnail", tags=["Printer"], summary="Current print thumbnail (HTTPS-safe proxy)")
+
+# ---------------------------------------------------------------------------
+# MJPEG camera stream relay
+# ---------------------------------------------------------------------------
+# The AD5X camera only accepts one connection at a time. We connect once and
+# fan the stream out to every browser client via per-client asyncio queues.
+
+_stream_clients: set[asyncio.Queue] = set()
+_stream_task: asyncio.Task | None = None
+_stream_url: str | None = None   # populated from /detail on first use
+
+
+async def _fetch_stream_url() -> str | None:
+    """Get the camera stream URL from the printer's /detail endpoint."""
+    try:
+        result = await _proxy("/detail", {
+            "serialNumber": settings.PRINTER_SERIAL,
+            "checkCode":    settings.PRINTER_CHECK_CODE,
+        })
+        url = result.get("detail", {}).get("cameraStreamUrl", "")
+        return url if url else None
+    except Exception:
+        return None
+
+
+async def _stream_relay() -> None:
+    """
+    Background task: connect to the camera MJPEG stream and broadcast
+    each frame to all connected client queues.
+    Reconnects automatically on disconnect.
+    """
+    global _stream_url
+    SENTINEL = None  # signals clients to close
+
+    while True:
+        if not _stream_clients:
+            await asyncio.sleep(1)
+            continue
+
+        if not _stream_url:
+            _stream_url = await _fetch_stream_url()
+            if not _stream_url:
+                log.warning("Camera stream URL not available — retrying in 5s")
+                await asyncio.sleep(5)
+                continue
+
+        log.info("Camera relay: connecting to %s (%d client(s))", _stream_url, len(_stream_clients))
+        try:
+            timeout = aiohttp.ClientTimeout(total=None, connect=5, sock_read=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(_stream_url) as resp:
+                    if resp.status != 200:
+                        log.warning("Camera returned %d — retrying in 5s", resp.status)
+                        await asyncio.sleep(5)
+                        continue
+
+                    # Forward raw bytes chunks to every client queue
+                    async for chunk in resp.content.iter_any():
+                        if not chunk:
+                            continue
+                        dead = set()
+                        for q in _stream_clients:
+                            try:
+                                q.put_nowait(chunk)
+                            except asyncio.QueueFull:
+                                dead.add(q)   # slow/gone client — drop it
+                        _stream_clients.difference_update(dead)
+                        if not _stream_clients:
+                            log.info("Camera relay: no clients, disconnecting")
+                            return
+
+        except Exception as exc:
+            log.warning("Camera relay disconnected (%s) — reconnecting in 2s", exc)
+            await asyncio.sleep(2)
+
+
+def _ensure_relay_running() -> None:
+    global _stream_task
+    if _stream_task is None or _stream_task.done():
+        _stream_task = asyncio.create_task(_stream_relay())
+
+
+@app.get("/printer/stream", tags=["Printer"], summary="MJPEG camera stream (multi-client relay)")
+async def camera_stream() -> Response:
+    """
+    Relay the printer's MJPEG camera stream. Connects to the camera once
+    and fans the stream to all connected clients, working around the
+    camera's single-connection limit.
+
+    Use as an <img src="/printer/stream"> in the UI.
+    """
+    if not settings.PRINTER_IP:
+        raise HTTPException(status_code=503, detail="Printer not configured")
+
+    q: asyncio.Queue = asyncio.Queue(maxsize=30)
+    _stream_clients.add(q)
+    _ensure_relay_running()
+
+    async def generate():
+        try:
+            while True:
+                chunk = await asyncio.wait_for(q.get(), timeout=15)
+                if chunk is None:
+                    break
+                yield chunk
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            _stream_clients.discard(q)
+
+    return StreamingResponse(
+        generate(),
+        media_type="multipart/x-mixed-replace; boundary=boundarydonotcross",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+
 async def printer_thumbnail() -> Response:
     """
     Proxy the current print thumbnail from the printer.
@@ -496,6 +613,7 @@ async def queue_status() -> dict[str, Any]:
                 "z_offset":           detail.get("zAxisCompensation", 0),
                 "error_code":         detail.get("errorCode", ""),
                 "door_open":          detail.get("doorStatus", "close") == "open",
+                "has_camera":         bool(detail.get("cameraStreamUrl")),
                 "estimated_right_len": detail.get("estimatedRightLen", 0),
                 "cumulative_filament": detail.get("cumulativeFilament", 0),
                 "cumulative_time":    detail.get("cumulativePrintTime", 0),
