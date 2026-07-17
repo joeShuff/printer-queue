@@ -1,1047 +1,1148 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Print Queue · AD5X</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com"/>
-    <link rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap"/>
-    <style>
-        body {
-            margin: 0;
-            background: #0F1117;
-            color: #E8EAF0;
-        }
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Print Queue · AD5X</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap"/>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #F4F6F8; font-family: 'Roboto', sans-serif; color: #1C2B3A; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-        * {
-            box-sizing: border-box;
-        }
+    /* Material elevation shadows */
+    .elev-1 { box-shadow: 0 1px 2px rgba(0,0,0,.07), 0 1px 3px rgba(0,0,0,.06); }
+    .elev-2 { box-shadow: 0 2px 4px rgba(0,0,0,.08), 0 3px 8px rgba(0,0,0,.06); }
+    .elev-3 { box-shadow: 0 4px 8px rgba(0,0,0,.08), 0 6px 16px rgba(0,0,0,.07); }
 
-        ::-webkit-scrollbar {
-            width: 6px;
-        }
+    /* Ripple effect on buttons */
+    .ripple { position: relative; overflow: hidden; }
+    .ripple::after {
+      content: ''; position: absolute; inset: 0;
+      background: currentColor; opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .ripple:hover::after { opacity: 0.06; }
+    .ripple:active::after { opacity: 0.12; }
 
-        ::-webkit-scrollbar-track {
-            background: #0F1117;
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: #2A2D3A;
-            border-radius: 3px;
-        }
-    </style>
+    input[type=number]::-webkit-inner-spin-button { opacity: 1; }
+  </style>
 </head>
 <body>
 <div id="root"></div>
 
 <script type="text/babel" data-presets="react">
-    const {useState, useEffect, useCallback} = React;
+const { useState, useEffect, useCallback } = React;
+const API = "";
 
-    const API = "";
+// ── Palette ──────────────────────────────────────────────────────────────────
+function makepalette(dark) {
+  return dark ? {
+    primary:    "#1A237E",
+    teal:       "#4DB6AC",
+    tealLight:  "#004D40",
+    surface:    "#1E1E2E",
+    bg:         "#121220",
+    border:     "#2A2A40",
+    textPri:    "#E8EAF6",
+    textSec:    "#9FA8DA",
+    textMuted:  "#5C6BC0",
+    error:      "#EF9A9A",
+    errorBg:    "#37141A",
+    warning:    "#FFCC80",
+    warningBg:  "#3E2A00",
+    success:    "#A5D6A7",
+    successBg:  "#1B3A1F",
+    info:       "#90CAF9",
+    infoBg:     "#0D2137",
+  } : {
+    primary:    "#1C2B3A",
+    teal:       "#00897B",
+    tealLight:  "#E0F2F1",
+    surface:    "#FFFFFF",
+    bg:         "#F4F6F8",
+    border:     "#E0E5EA",
+    textPri:    "#1C2B3A",
+    textSec:    "#546E7A",
+    textMuted:  "#90A4AE",
+    error:      "#C62828",
+    errorBg:    "#FFEBEE",
+    warning:    "#E65100",
+    warningBg:  "#FFF3E0",
+    success:    "#2E7D32",
+    successBg:  "#E8F5E9",
+    info:       "#1565C0",
+    infoBg:     "#E3F2FD",
+  };
+}
 
-    // ── Helpers ──────────────────────────────────────────────────────────
-    function fmt_time(s) {
-        if (!s) return "—";
-        const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-        if (h > 0) return `${h}h ${m}m`;
-        if (m > 0) return `${m}m ${sec}s`;
-        return `${sec}s`;
-    }
+const ThemeCtx = React.createContext(makepalette(false));
+const useC = () => React.useContext(ThemeCtx);
 
-    function fmt_size(b) {
-        if (!b) return "—";
-        if (b > 1e6) return `${(b / 1e6).toFixed(1)} MB`;
-        if (b > 1e3) return `${(b / 1e3).toFixed(0)} KB`;
-        return `${b} B`;
-    }
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmt_time(s) {
+  if (!s) return "—";
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+function fmt_size(b) {
+  if (!b) return "—";
+  if (b > 1e6) return `${(b/1e6).toFixed(1)} MB`;
+  if (b > 1e3) return `${Math.round(b/1e3)} KB`;
+  return `${b} B`;
+}
+function fmt_date(ts) {
+  if (!ts) return "—";
+  return new Date(ts*1000).toLocaleString(undefined,{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+}
+function printer_state_color(s, C) {
+  const l = s?.toLowerCase();
+  if (l === "printing") return { text: C.teal, bg: C.tealLight };
+  if (l === "pause" || l === "paused") return { text: C.warning, bg: C.warningBg };
+  if (l === "offline" || l === "error") return { text: C.error, bg: C.errorBg };
+  if (l === "ready" || l === "idle") return { text: C.success, bg: C.successBg };
+  return { text: C.textMuted, bg: C.border };
+}
 
-    function fmt_date(ts) {
-        if (!ts) return "—";
-        return new Date(ts * 1000).toLocaleString(undefined, {
-            month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
-        });
-    }
+// ── Base components ───────────────────────────────────────────────────────────
+function Chip({
+  label, color, bg }) {
+  const C = useC();
+  return (
+    <span style={{
+      display:"inline-flex", alignItems:"center",
+      padding:"2px 10px", borderRadius:99,
+      fontSize:11, fontWeight:500, letterSpacing:"0.04em",
+      textTransform:"uppercase",
+      color: color || C.textSec,
+      background: bg || C.border,
+    }}>{label}</span>
+  );
+}
 
-    function status_color(s) {
-        return {
-                queued: "text-amber-400 bg-amber-400/10 border-amber-400/30",
-                sending: "text-blue-400 bg-blue-400/10 border-blue-400/30",
-                sent: "text-green-400 bg-green-400/10 border-green-400/30",
-                error: "text-red-400 bg-red-400/10 border-red-400/30",
-                deleted: "text-slate-500 bg-slate-500/10 border-slate-500/30"
-            }[s]
-            || "text-slate-400 bg-slate-400/10 border-slate-400/30";
-    }
+function StatusChip({
+  status }) {
+  const C = useC();
+  const map = {
+    queued:  { label:"Queued",  color:C.info,    bg:C.infoBg    },
+    sending: { label:"Sending", color:C.teal,    bg:C.tealLight },
+    sent:    { label:"Sent",    color:C.success, bg:C.successBg },
+    error:   { label:"Error",   color:C.error,   bg:C.errorBg   },
+    deleted: { label:"Removed", color:C.textMuted, bg:C.border },
+  };
+  const s = map[status] || { label:status, color:C.textMuted, bg:C.border };
+  return <Chip label={s.label} color={s.color} bg={s.bg}/>;
+}
 
-    function printer_color(s) {
-        const l = s?.toLowerCase();
-        if (l === "printing") return "text-amber-400";
-        if (l === "ready" || l === "idle") return "text-green-400";
-        if (l === "offline" || l === "error") return "text-red-400";
-        return "text-slate-400";
-    }
+function Btn({
+  onClick, disabled, loading, variant="default", size="md", children, title }) {
+  const C = useC();
+  const styles = {
+    primary: { background:C.teal, color:"#fff", border:"none" },
+    default: { background:C.surface, color:C.textPri, border:`1px solid ${C.border}` },
+    danger:  { background:C.errorBg, color:C.error, border:`1px solid #FFCDD2` },
+    ghost:   { background:"transparent", color:C.textSec, border:"none" },
+  };
+  const pad = size === "sm" ? "6px 12px" : "8px 16px";
+  const s = styles[variant] || styles.default;
+  return (
+    <button onClick={onClick} disabled={disabled||loading} title={title}
+            className="ripple" style={{
+      ...s, padding:pad, borderRadius:6,
+      fontSize:13, fontWeight:500, cursor:"pointer",
+      display:"inline-flex", alignItems:"center", gap:6,
+      opacity: disabled||loading ? 0.45 : 1,
+      transition:"opacity 0.15s, box-shadow 0.15s",
+    }}>
+      {loading && <svg style={{animation:"spin 0.8s linear infinite",width:14,height:14}} viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity=".25"/>
+        <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/>
+      </svg>}
+      {children}
+    </button>
+  );
+}
 
-    // ── Small Components ─────────────────────────────────────────────────
-    function Badge({status}) {
-        return (
-            <span
-                className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-mono uppercase tracking-wider ${status_color(status)}`}>
-          {status}
-        </span>
-        );
-    }
+function IconBtn({
+  onClick, title, icon, color, danger }) {
+  const C = useC();
+  return (
+    <button onClick={onClick} title={title} className="ripple" style={{
+      background:"transparent", border:"none", cursor:"pointer",
+      padding:"6px", borderRadius:20,
+      color: danger ? C.error : (color || C.textMuted),
+      display:"inline-flex", alignItems:"center",
+      transition:"color 0.15s",
+    }}>{icon}</button>
+  );
+}
 
-    function Btn({onClick, disabled, loading, variant = "default", children}) {
-        const v = {
-            default: "bg-slate-700 hover:bg-slate-600 text-slate-100 border-slate-600",
-            primary: "bg-amber-500 hover:bg-amber-400 text-slate-900 border-amber-400",
-            danger: "bg-red-500/20 hover:bg-red-500/30 text-red-400 border-red-500/40",
-        }[variant];
-        return (
-            <button onClick={onClick} disabled={disabled || loading}
-                    className={`inline-flex items-center gap-2 px-4 py-2 rounded font-mono text-sm font-medium border transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed ${v}`}>
-                {loading && <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                </svg>}
-                {children}
-            </button>
-        );
-    }
+function Stat({
+  label, value, mono, color }) {
+  const C = useC();
+  return (
+    <div>
+      <div style={{fontSize:11,color:C.textMuted,marginBottom:2,textTransform:"uppercase",letterSpacing:"0.05em"}}>{label}</div>
+      <div style={{fontSize:13,fontFamily:mono?"'Roboto Mono',monospace":undefined,color:color||C.textPri,fontWeight:500}}>
+        {value ?? "—"}
+      </div>
+    </div>
+  );
+}
 
-    function Stat({label, value, color, mono, truncate}) {
-        return (
-            <div>
-                <div className="text-xs text-slate-500 uppercase tracking-wider mb-0.5">{label}</div>
-                <div
-                    className={`text-sm ${mono ? "font-mono" : ""} ${color || "text-slate-200"} ${truncate ? "truncate" : ""}`}
-                    title={truncate ? value : undefined}>
-                    {value ?? "—"}
-                </div>
-            </div>
-        );
-    }
+function Divider() {
+  const C = useC();
+  return <div style={{borderTop:`1px solid ${C.border}`,margin:"0 -16px"}}/>;
+}
 
-    function Toast({toasts}) {
-        return (
-            <div className="fixed bottom-6 right-6 flex flex-col gap-2 z-50 pointer-events-none">
-                {toasts.map(t => (
-                    <div key={t.id} className={`px-4 py-3 rounded border font-mono text-sm shadow-xl
-              ${t.type === "error"
-                        ? "bg-red-950 border-red-500/50 text-red-300"
-                        : "bg-green-950 border-green-500/50 text-green-300"}`}>
-                        {t.msg}
-                    </div>
-                ))}
-            </div>
-        );
-    }
+function Toast({
+  toasts }) {
+  const C = useC();
+  return (
+    <div style={{position:"fixed",bottom:24,right:24,display:"flex",flexDirection:"column",gap:8,zIndex:100,pointerEvents:"none"}}>
+      {toasts.map(t => (
+        <div key={t.id} className="elev-3" style={{
+          padding:"12px 16px", borderRadius:8, fontSize:13, fontWeight:500,
+          background: t.type==="error" ? C.error : C.primary,
+          color:"#fff", maxWidth:320,
+        }}>{t.msg}</div>
+      ))}
+    </div>
+  );
+}
 
-    // ── Connection Info Modal ─────────────────────────────────────────────
-    function ConnectionModal({onClose}) {
-        const [info, setInfo] = useState(null);
-        const [copied, setCopied] = useState(null);
+// ── Connection Modal ───────────────────────────────────────────────────────────
+function ConnectionModal({
+  onClose }) {
+  const C = useC();
+  const [info, setInfo] = useState(null);
+  const [copied, setCopied] = useState(null);
 
-        useEffect(() => {
-            fetch(`${API}/server/info`).then(r => r.json()).then(setInfo).catch(() => {});
-        }, []);
+  useEffect(() => {
+    fetch(`${API}/server/info`).then(r=>r.json()).then(setInfo).catch(()=>{});
+  }, []);
 
-        function copy(label, val) {
-            navigator.clipboard.writeText(val).then(() => {
-                setCopied(label);
-                setTimeout(() => setCopied(null), 1500);
-            });
-        }
+  function copy(label, val) {
+    navigator.clipboard.writeText(val).then(() => {
+      setCopied(label);
+      setTimeout(() => setCopied(null), 1500);
+    });
+  }
 
-        function Field({label, value}) {
+  function Field({ label, value }) {
+    return (
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${C.border}`}}>
+        <span style={{fontSize:12,color:C.textMuted,width:90,flexShrink:0}}>{label}</span>
+        <span style={{fontSize:13,fontFamily:"'Roboto Mono',monospace",color:C.textPri,flex:1,overflow:"hidden",textOverflow:"ellipsis"}}>{value||"—"}</span>
+        <button onClick={() => copy(label, value)} className="ripple" style={{
+          fontSize:12,color:copied===label?C.success:C.teal,
+          background:"none",border:"none",cursor:"pointer",
+          padding:"2px 6px",borderRadius:4,fontWeight:500,flexShrink:0,
+        }}>{copied===label?"Copied":"Copy"}</button>
+      </div>
+    );
+  }
+
+  return (
+    <div onClick={onClose} style={{
+      position:"fixed",inset:0,zIndex:50,
+      background:"rgba(28,43,58,0.5)",
+      display:"flex",alignItems:"center",justifyContent:"center",padding:16,
+      backdropFilter:"blur(2px)",
+    }}>
+      <div onClick={e=>e.stopPropagation()} className="elev-3" style={{
+        background:C.surface,borderRadius:12,width:"100%",maxWidth:400,overflow:"hidden",
+      }}>
+        <div style={{padding:"16px 20px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <div style={{fontWeight:500,fontSize:15}}>OrcaSlicer Connection</div>
+            <div style={{fontSize:12,color:C.textMuted,marginTop:2}}>Enter these in OrcaSlicer → Printer settings</div>
+          </div>
+          <IconBtn onClick={onClose} title="Close" icon={
+            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          }/>
+        </div>
+        <div style={{padding:"4px 20px 8px"}}>
+          <div style={{fontSize:11,color:C.teal,fontWeight:500,textTransform:"uppercase",letterSpacing:"0.06em",padding:"12px 0 4px"}}>
+            This proxy server
+          </div>
+          <Field label="Host / IP" value={info?.proxy?.host}/>
+          <Field label="Port"      value={String(info?.proxy?.port||8898)}/>
+          <Field label="Serial"    value={info?.proxy?.serial}/>
+          <Field label="Check Code" value={info?.proxy?.check_code}/>
+        </div>
+        <div style={{padding:"8px 20px 16px",background:C.bg}}>
+          <div style={{fontSize:12,color:C.textMuted}}>
+            Real printer IP (do not enter in OrcaSlicer): <strong>{info?.printer?.ip||"—"}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Filament Picker Modal ─────────────────────────────────────────────────────
+function FilamentPicker({
+  job, liveSlots, onSave, onClose }) {
+  const C = useC();
+  const [selections, setSelections] = useState(() => {
+    const map = {};
+    (job.material_mappings||[]).forEach(m => { map[m.toolId] = {...m}; });
+    return map;
+  });
+
+  const toolCount = job.tool_count || (job.material_mappings||[]).length || 1;
+  const tools = Array.from({length:toolCount},(_,i)=>i);
+
+  function selectSlot(toolId, slot) {
+    setSelections(prev => ({
+      ...prev,
+      [toolId]: {
+        ...prev[toolId], toolId,
+        slotId:            slot.slotId,
+        materialName:      slot.materialName,
+        slotMaterialColor: slot.materialColor,
+        toolMaterialColor: slot.materialColor,
+      },
+    }));
+  }
+
+  async function save() {
+    await onSave(job.id, Object.values(selections));
+    onClose();
+  }
+
+  return (
+    <div onClick={onClose} style={{
+      position:"fixed",inset:0,zIndex:50,
+      background:"rgba(28,43,58,0.5)",
+      display:"flex",alignItems:"center",justifyContent:"center",padding:16,
+      backdropFilter:"blur(2px)",
+    }}>
+      <div onClick={e=>e.stopPropagation()} className="elev-3" style={{
+        background:C.surface,borderRadius:12,width:"100%",maxWidth:420,overflow:"hidden",
+      }}>
+        <div style={{padding:"16px 20px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <div style={{fontWeight:500,fontSize:15}}>Change Filament</div>
+            <div style={{fontSize:12,color:C.textMuted,marginTop:2,maxWidth:300,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.filename}</div>
+          </div>
+          <IconBtn onClick={onClose} title="Close" icon={
+            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          }/>
+        </div>
+
+        <div style={{padding:"16px 20px",display:"flex",flexDirection:"column",gap:20}}>
+          {tools.map(toolId => {
+            const current = selections[toolId];
             return (
-                <div className="flex items-center justify-between gap-4 py-2 border-b border-slate-700/60 last:border-0">
-                    <span className="text-xs text-slate-500 uppercase tracking-wider w-24 shrink-0">{label}</span>
-                    <span className="font-mono text-sm text-slate-200 flex-1 truncate">{value ?? "—"}</span>
-                    <button onClick={() => copy(label, value)}
-                            className="text-xs font-mono text-slate-500 hover:text-amber-400 transition-colors shrink-0 px-1.5 py-0.5 rounded hover:bg-amber-400/10">
-                        {copied === label ? "✓" : "Copy"}
-                    </button>
+              <div key={toolId}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                  <span style={{fontSize:12,fontWeight:500,color:C.textSec,textTransform:"uppercase",letterSpacing:"0.05em"}}>
+                    Tool {toolId}
+                  </span>
+                  {current && (
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:4}}>
+                      <span style={{width:10,height:10,borderRadius:"50%",background:current.slotMaterialColor||"#ccc",border:`1px solid ${C.border}`,display:"inline-block"}}/>
+                      <span style={{fontSize:12,color:C.textMuted}}>→ Slot {current.slotId} · {current.materialName}</span>
+                    </div>
+                  )}
                 </div>
-            );
-        }
-
-        return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-                 style={{background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)"}}
-                 onClick={onClose}>
-                <div className="rounded-xl border border-slate-700 bg-slate-900 w-full max-w-sm shadow-2xl"
-                     onClick={e => e.stopPropagation()}>
-                    <div className="px-5 py-4 border-b border-slate-700 flex items-center justify-between">
-                        <div>
-                            <div className="font-mono text-sm font-bold text-slate-100">OrcaSlicer Connection</div>
-                            <div className="font-mono text-xs text-slate-500 mt-0.5">Enter these details in OrcaSlicer → Printer settings</div>
-                        </div>
-                        <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition-colors">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
-                            </svg>
-                        </button>
-                    </div>
-
-                    <div className="px-5 py-3">
-                        <div className="text-xs font-mono text-amber-400 uppercase tracking-wider mb-2">This proxy server</div>
-                        <Field label="Host / IP" value={info?.proxy?.host}/>
-                        <Field label="Port" value={String(info?.proxy?.port ?? 8898)}/>
-                        <Field label="Serial" value={info?.proxy?.serial}/>
-                        <Field label="Check Code" value={info?.proxy?.check_code}/>
-                    </div>
-
-                    <div className="px-5 py-3 border-t border-slate-700/60">
-                        <div className="text-xs font-mono text-slate-600 uppercase tracking-wider mb-2">Real printer (do not use in OrcaSlicer)</div>
-                        <div className="text-xs font-mono text-slate-500">IP: {info?.printer?.ip ?? "—"}</div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    // ── Printer Panel ─────────────────────────────────────────────────────
-    function PrinterPanel({printer, loading, onControl}) {
-        const [expanded, setExpanded] = useState(false);
-        const [showConn, setShowConn]  = useState(false);
-
-        const state    = printer?.state ?? "—";
-        const col      = printer_color(state);
-        const printing = state?.toLowerCase() === "printing";
-        const paused   = state?.toLowerCase() === "pause" || state?.toLowerCase() === "paused";
-        const active   = printing || paused;
-
-        const progress = printer?.progress != null
-            ? (printer.progress <= 1 ? Math.round(printer.progress * 100) : Math.round(printer.progress))
-            : null;
-
-        function fmt_temp(val, target) {
-            if (val == null) return "—";
-            return target ? `${Math.round(val)}° → ${Math.round(target)}°C` : `${Math.round(val)}°C`;
-        }
-        function fmt_mins(secs) {
-            if (!secs) return "—";
-            const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60);
-            return h > 0 ? `${h}h ${m}m` : `${m}m`;
-        }
-
-        // Active IFS slot info
-        const currentSlot = printer?.current_slot;
-        const slotInfos   = printer?.slot_infos ?? [];
-        const activeSlot  = slotInfos.find(s => s.slotId === currentSlot);
-
-        return (
-            <>
-                {showConn && <ConnectionModal onClose={() => setShowConn(false)}/>}
-
-                <div className="rounded-lg border border-slate-700 bg-slate-800/60 overflow-hidden">
-                    {/* Header */}
-                    <div className="px-4 sm:px-5 py-3 border-b border-slate-700 flex items-center justify-between"
-                         style={{background: "linear-gradient(90deg,#1a1d2e,#12141f)"}}>
-                        <div className="flex items-center gap-2">
-                            <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                                      d="M17 17H7a2 2 0 01-2-2V5a2 2 0 012-2h10a2 2 0 012 2v10a2 2 0 01-2 2z"/>
-                            </svg>
-                            <span className="font-mono text-xs text-slate-400 tracking-widest uppercase">AD5X</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            {/* Connection details button */}
-                            <button onClick={() => setShowConn(true)}
-                                    title="OrcaSlicer connection details"
-                                    className="px-2 py-1 rounded font-mono text-xs text-slate-500 hover:text-slate-300 hover:bg-slate-700/60 border border-transparent hover:border-slate-600 transition-all">
-                                Connect
-                            </button>
-                            {loading && <svg className="animate-spin w-3 h-3 text-slate-600" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                {liveSlots.length > 0 ? (
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+                    {liveSlots.map(slot => {
+                      const selected = current?.slotId === slot.slotId;
+                      return (
+                        <button key={slot.slotId} onClick={() => selectSlot(toolId, slot)}
+                                disabled={!slot.hasFilament}
+                                className="ripple"
+                                style={{
+                                  background: selected ? C.tealLight : C.bg,
+                                  border: `2px solid ${selected ? C.teal : C.border}`,
+                                  borderRadius:8, padding:"10px 8px", cursor: slot.hasFilament?"pointer":"not-allowed",
+                                  opacity: slot.hasFilament ? 1 : 0.35,
+                                  textAlign:"left", transition:"border-color 0.15s, background 0.15s",
+                                }}>
+                          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                            <span style={{width:14,height:14,borderRadius:"50%",background:slot.materialColor||"#ccc",border:`1px solid ${C.border}`,flexShrink:0,display:"inline-block"}}/>
+                            {selected && <svg width="12" height="12" fill={C.teal} viewBox="0 0 24 24" style={{marginLeft:"auto"}}>
+                              <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
                             </svg>}
-                            <span className={`font-mono text-sm font-bold tracking-wide ${col}`}
-                                  style={{textShadow: "0 0 12px currentColor"}}>
-                                {state.toUpperCase()}
-                            </span>
-                        </div>
+                          </div>
+                          <div style={{fontSize:11,fontWeight:500,color:C.textPri}}>Slot {slot.slotId}</div>
+                          <div style={{fontSize:11,color:C.textMuted}}>{slot.hasFilament ? slot.materialName : "Empty"}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{fontSize:13,color:C.textMuted,padding:"8px 0"}}>Printer offline — slot data unavailable</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{padding:"12px 20px",borderTop:`1px solid ${C.border}`,display:"flex",justifyContent:"flex-end",gap:8}}>
+          <Btn onClick={onClose} variant="ghost">Cancel</Btn>
+          <Btn onClick={save} variant="primary">Save mappings</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Printer Panel ─────────────────────────────────────────────────────────────
+function PrinterPanel({
+  printer, loading, onControl }) {
+  const C = useC();
+  const [expanded, setExpanded] = useState(false);
+  const [showConn, setShowConn] = useState(false);
+
+  const state    = printer?.state ?? "—";
+  const sc       = printer_state_color(state, C);
+  const printing = state?.toLowerCase() === "printing";
+  const paused   = state?.toLowerCase() === "pause" || state?.toLowerCase() === "paused";
+  const active   = printing || paused;
+
+  const progress = printer?.progress != null
+    ? (printer.progress <= 1 ? Math.round(printer.progress*100) : Math.round(printer.progress))
+    : null;
+
+  function fmt_temp(val, target) {
+    if (val==null) return "—";
+    return target ? `${Math.round(val)}° → ${Math.round(target)}°C` : `${Math.round(val)}°C`;
+  }
+  function fmt_mins(secs) {
+    if (!secs) return "—";
+    const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  }
+
+  const currentSlot = printer?.current_slot;
+  const slotInfos   = printer?.slot_infos ?? [];
+  const activeSlot  = slotInfos.find(s => s.slotId === currentSlot);
+
+  return (
+    <>
+      {showConn && <ConnectionModal onClose={() => setShowConn(false)}/>}
+      <div className="elev-1" style={{background:C.surface,borderRadius:10,overflow:"hidden"}}>
+
+        {/* Header bar */}
+        <div style={{
+          background:C.primary,color:"#fff",
+          padding:"12px 16px",
+          display:"flex",alignItems:"center",justifyContent:"space-between",
+        }}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" opacity={0.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M17 17H7a2 2 0 01-2-2V5a2 2 0 012-2h10a2 2 0 012 2v10a2 2 0 01-2 2z"/>
+            </svg>
+            <span style={{fontWeight:500,fontSize:14}}>AD5X</span>
+            <span style={{
+              fontSize:11,fontWeight:500,padding:"2px 8px",borderRadius:99,
+              background:sc.bg, color:sc.text, marginLeft:4,
+            }}>{state.toUpperCase()}</span>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            {loading && <svg style={{animation:"spin 0.8s linear infinite",width:14,height:14,opacity:0.5}} viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity=".3"/>
+              <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/>
+            </svg>}
+            <button onClick={() => setShowConn(true)} className="ripple" style={{
+              fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.7)",
+              background:"none",border:"none",cursor:"pointer",
+              padding:"4px 8px",borderRadius:4,
+            }}>Connect</button>
+          </div>
+        </div>
+
+        {/* Print job */}
+        {(printer?.thumb_url || printer?.file) && (
+          <div style={{padding:"16px",display:"flex",gap:14,borderBottom:`1px solid ${C.border}`}}>
+            {printer?.thumb_url && (
+              <div style={{
+                width:72,height:72,borderRadius:8,overflow:"hidden",
+                border:`1px solid ${C.border}`,background:C.bg,flexShrink:0,
+              }}>
+                <img src={printer.thumb_url} alt="Current print"
+                     style={{width:"100%",height:"100%",objectFit:"contain"}}
+                     onError={e=>e.target.parentElement.style.display="none"}/>
+              </div>
+            )}
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{
+                fontSize:13,fontWeight:500,color:C.textPri,
+                whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
+                marginBottom:8,
+              }}>{printer?.file || "—"}</div>
+              {/* Progress bar */}
+              <div style={{height:4,borderRadius:99,background:C.border,overflow:"hidden",marginBottom:6}}>
+                <div style={{
+                  height:"100%",borderRadius:99,
+                  width:`${progress??0}%`,
+                  background: paused ? "#90A4AE" : C.teal,
+                  transition:"width 0.7s",
+                }}/>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.textMuted}}>
+                <span>Layer {printer?.current_layer??0} / {printer?.total_layers??0}</span>
+                <span style={{fontWeight:500,color:C.textPri}}>{progress??0}%</span>
+              </div>
+              <div style={{fontSize:12,color:C.textMuted,marginTop:2}}>
+                {fmt_mins(printer?.remaining_time)} remaining · {fmt_mins(printer?.print_duration)} elapsed
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Temps + filament */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:1,background:C.border}}>
+          {[
+            {label:"Nozzle", value:fmt_temp(printer?.nozzle_temp,printer?.nozzle_target)},
+            {label:"Bed",    value:fmt_temp(printer?.bed_temp,   printer?.bed_target)},
+          ].map(s => (
+            <div key={s.label} style={{background:C.surface,padding:"12px 16px"}}>
+              <Stat label={s.label} value={s.value} mono/>
+            </div>
+          ))}
+          <div style={{background:C.surface,padding:"12px 16px",gridColumn:"span 2"}}>
+            <div style={{fontSize:11,color:C.textMuted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.05em"}}>Active Filament</div>
+            {activeSlot ? (
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{width:14,height:14,borderRadius:"50%",background:activeSlot.materialColor||"#ccc",border:`1px solid ${C.border}`,flexShrink:0,display:"inline-block"}}/>
+                <span style={{fontSize:13,fontWeight:500}}>{activeSlot.materialName}</span>
+                <span style={{fontSize:12,color:C.textMuted}}>Slot {activeSlot.slotId}</span>
+              </div>
+            ) : (
+              <span style={{fontSize:13,color:C.textMuted}}>—</span>
+            )}
+          </div>
+        </div>
+
+        {/* Error */}
+        {printer?.error_code && (
+          <div style={{margin:"0 16px 12px",padding:"10px 14px",borderRadius:6,background:C.errorBg,color:C.error,fontSize:13}}>
+            ⚠ {printer.error_code}
+          </div>
+        )}
+
+        {/* Controls */}
+        {active && (
+          <div style={{padding:"12px 16px",display:"flex",gap:8,flexWrap:"wrap",borderTop:`1px solid ${C.border}`}}>
+            {printing && (
+              <Btn onClick={() => onControl("jobCtl_cmd",{action:"pause"})} variant="default" size="sm">
+                ⏸ Pause
+              </Btn>
+            )}
+            {paused && (
+              <Btn onClick={() => onControl("jobCtl_cmd",{action:"continue"})} variant="primary" size="sm">
+                ▶ Resume
+              </Btn>
+            )}
+            <Btn onClick={() => { if(confirm("Cancel the current print?")) onControl("jobCtl_cmd",{action:"cancel"}); }}
+                 variant="danger" size="sm">
+              ✕ Cancel
+            </Btn>
+            <div style={{marginLeft:"auto"}}>
+              <Btn onClick={() => onControl("lightControl_cmd",{status:printer?.light==="open"?"close":"open"})}
+                   variant="ghost" size="sm">
+                💡 {printer?.light==="open" ? "On" : "Off"}
+              </Btn>
+            </div>
+          </div>
+        )}
+
+        {/* Clear platform */}
+        {!active && printer?.file && (
+          <div style={{padding:"12px 16px",display:"flex",alignItems:"center",gap:12,borderTop:`1px solid ${C.border}`,background:C.successBg}}>
+            <span style={{fontSize:13,color:C.success,flex:1}}>Print complete — bed clear?</span>
+            <Btn onClick={() => onControl("stateCtrl_cmd",{action:"setClearPlatform"})} variant="primary" size="sm">
+              ✓ Clear platform
+            </Btn>
+          </div>
+        )}
+
+        {/* Expand toggle */}
+        <button onClick={() => setExpanded(v=>!v)} className="ripple" style={{
+          width:"100%", padding:"10px 16px",
+          display:"flex",alignItems:"center",justifyContent:"space-between",
+          background:C.bg,border:"none",borderTop:`1px solid ${C.border}`,
+          cursor:"pointer",color:C.textSec,fontSize:12,fontWeight:500,
+        }}>
+          <span>{expanded ? "Less info" : "More info"}</span>
+          <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+               style={{transform:expanded?"rotate(180deg)":"none",transition:"transform 0.2s"}}>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+          </svg>
+        </button>
+
+        {expanded && (
+          <div style={{borderTop:`1px solid ${C.border}`}}>
+            {/* IFS slots */}
+            {slotInfos.length > 0 && (
+              <div style={{padding:"14px 16px",borderBottom:`1px solid ${C.border}`}}>
+                <div style={{fontSize:11,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:10}}>IFS Slots</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+                  {slotInfos.map(slot => (
+                    <div key={slot.slotId} style={{
+                      padding:"10px",borderRadius:8,
+                      border:`1.5px solid ${slot.slotId===currentSlot ? C.teal : C.border}`,
+                      background: slot.slotId===currentSlot ? C.tealLight : C.bg,
+                    }}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                        <span style={{
+                          width:12,height:12,borderRadius:"50%",
+                          background:slot.materialColor||"#ccc",
+                          border:`1px solid ${C.border}`,
+                          opacity: slot.hasFilament ? 1 : 0.3,
+                          display:"inline-block",flexShrink:0,
+                        }}/>
+                        {slot.slotId===currentSlot && <span style={{fontSize:10,color:C.teal,fontWeight:600,marginLeft:"auto"}}>●</span>}
+                      </div>
+                      <div style={{fontSize:11,fontWeight:500,color:C.textPri}}>Slot {slot.slotId}</div>
+                      <div style={{fontSize:11,color: slot.hasFilament ? C.textMuted : "#B0BEC5"}}>
+                        {slot.hasFilament ? slot.materialName : "Empty"}
+                      </div>
                     </div>
-
-                    {/* ── Always visible ── */}
-
-                    {/* Print job */}
-                    {(printer?.thumb_url || printer?.file) && (
-                        <div className="px-4 sm:px-5 pt-4 pb-3 flex gap-3 sm:gap-4">
-                            {printer?.thumb_url && (
-                                <div className="shrink-0 w-20 h-20 rounded overflow-hidden border border-slate-700 bg-slate-900">
-                                    <img src={printer.thumb_url} alt="Current print"
-                                         className="w-full h-full object-contain"
-                                         onError={e => e.target.parentElement.style.display = "none"}/>
-                                </div>
-                            )}
-                            <div className="flex-1 min-w-0">
-                                <div className="flex justify-between items-baseline mb-1.5">
-                                    <span className="font-mono text-xs text-slate-400 truncate max-w-[70%]"
-                                          title={printer?.file}>{printer?.file || "—"}</span>
-                                    <span className="font-mono text-sm font-bold text-slate-200">{progress ?? "—"}%</span>
-                                </div>
-                                <div className="h-1.5 rounded-full bg-slate-700 overflow-hidden">
-                                    <div className="h-full rounded-full transition-all duration-700"
-                                         style={{
-                                             width: `${progress ?? 0}%`,
-                                             background: paused ? "#94a3b8" : "#F59E0B",
-                                             boxShadow: paused ? "none" : "0 0 8px #F59E0B",
-                                         }}/>
-                                </div>
-                                <div className="flex justify-between font-mono text-xs text-slate-500 mt-1.5">
-                                    <span>Layer {printer?.current_layer ?? "—"} / {printer?.total_layers ?? "—"}</span>
-                                    <span>{fmt_mins(printer?.remaining_time)} left · {fmt_mins(printer?.print_duration)} elapsed</span>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Temperatures + active filament */}
-                    <div className="px-4 sm:px-5 py-3 grid grid-cols-2 gap-3 sm:grid-cols-4 border-t border-slate-700/40">
-                        <Stat label="Nozzle" value={fmt_temp(printer?.nozzle_temp, printer?.nozzle_target)} mono/>
-                        <Stat label="Bed"    value={fmt_temp(printer?.bed_temp,    printer?.bed_target)}    mono/>
-                        <Stat label="Chamber" value={printer?.chamber_temp != null ? `${Math.round(printer.chamber_temp)}°C` : "—"} mono/>
-
-                        {/* Active IFS slot */}
-                        <div>
-                            <div className="text-xs text-slate-500 uppercase tracking-wider mb-0.5">Filament</div>
-                            {activeSlot ? (
-                                <div className="flex items-center gap-2">
-                                    <span className="w-3.5 h-3.5 rounded-full border border-slate-500 shrink-0"
-                                          style={{backgroundColor: activeSlot.materialColor || "#888"}}/>
-                                    <span className="font-mono text-sm text-slate-200">
-                                        {activeSlot.materialName} <span className="text-slate-500">S{activeSlot.slotId}</span>
-                                    </span>
-                                </div>
-                            ) : (
-                                <span className="font-mono text-sm text-slate-500">—</span>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Error */}
-                    {printer?.error_code && (
-                        <div className="mx-5 mb-3 px-3 py-2 rounded bg-red-950/60 border border-red-500/30 text-xs font-mono text-red-400">
-                            ⚠ Error: {printer.error_code}
-                        </div>
-                    )}
-
-                    {/* Job controls */}
-                    {active && (
-                        <div className="px-4 sm:px-5 pb-3 flex flex-wrap gap-2 border-t border-slate-700/40 pt-3">
-                            {printing && (
-                                <button onClick={() => onControl("jobCtl_cmd", {action: "pause"})}
-                                        className="px-3 py-1.5 rounded font-mono text-xs border bg-slate-700/60 hover:bg-slate-700 text-slate-300 border-slate-600 transition-all">
-                                    ⏸ Pause
-                                </button>
-                            )}
-                            {paused && (
-                                <button onClick={() => onControl("jobCtl_cmd", {action: "continue"})}
-                                        className="px-3 py-1.5 rounded font-mono text-xs border bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border-amber-500/40 transition-all">
-                                    ▶ Resume
-                                </button>
-                            )}
-                            <button onClick={() => { if (confirm("Cancel the current print?")) onControl("jobCtl_cmd", {action: "cancel"}); }}
-                                    className="px-3 py-1.5 rounded font-mono text-xs border bg-red-500/20 hover:bg-red-500/30 text-red-400 border-red-500/40 transition-all">
-                                ✕ Cancel
-                            </button>
-
-                            {/* Light toggle */}
-                            <button onClick={() => onControl("lightControl_cmd", {status: printer?.light === "open" ? "close" : "open"})}
-                                    className={`ml-auto px-3 py-1.5 rounded font-mono text-xs border transition-all
-                                        ${printer?.light === "open"
-                                            ? "bg-amber-400/20 text-amber-400 border-amber-400/40"
-                                            : "bg-slate-700/60 text-slate-500 border-slate-600"}`}>
-                                💡 {printer?.light === "open" ? "On" : "Off"}
-                            </button>
-                        </div>
-                    )}
-
-                    {/* Clear platform — shown when print complete */}
-                    {!active && printer?.file && (
-                        <div className="px-4 sm:px-5 pb-3 flex flex-wrap gap-2 items-center border-t border-slate-700/40 pt-3">
-                            <span className="font-mono text-xs text-slate-500">Bed clear?</span>
-                            <button onClick={() => onControl("stateCtrl_cmd", {action: "setClearPlatform"})}
-                                    className="px-3 py-1.5 rounded font-mono text-xs border bg-green-500/20 hover:bg-green-500/30 text-green-400 border-green-500/40 transition-all">
-                                ✓ Clear platform
-                            </button>
-                            <button onClick={() => onControl("lightControl_cmd", {status: printer?.light === "open" ? "close" : "open"})}
-                                    className={`ml-auto px-3 py-1.5 rounded font-mono text-xs border transition-all
-                                        ${printer?.light === "open"
-                                            ? "bg-amber-400/20 text-amber-400 border-amber-400/40"
-                                            : "bg-slate-700/60 text-slate-500 border-slate-600"}`}>
-                                💡 {printer?.light === "open" ? "On" : "Off"}
-                            </button>
-                        </div>
-                    )}
-
-                    {/* ── Expandable section ── */}
-                    <button onClick={() => setExpanded(v => !v)}
-                            className="w-full px-4 sm:px-5 py-2.5 flex items-center justify-between border-t border-slate-700/60 hover:bg-slate-700/20 transition-colors">
-                        <span className="font-mono text-xs text-slate-500 uppercase tracking-wider">
-                            {expanded ? "Less info" : "More info"}
-                        </span>
-                        <svg className={`w-3.5 h-3.5 text-slate-500 transition-transform ${expanded ? "rotate-180" : ""}`}
-                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
-                        </svg>
-                    </button>
-
-                    {expanded && (
-                        <div className="border-t border-slate-700/60">
-                            {/* IFS slots */}
-                            {slotInfos.length > 0 && (
-                                <div className="px-4 sm:px-5 py-4">
-                                    <div className="text-xs text-slate-500 uppercase tracking-wider mb-3">IFS Slots</div>
-                                    <div className="grid grid-cols-4 gap-2">
-                                        {slotInfos.map(slot => (
-                                            <div key={slot.slotId}
-                                                 className={`rounded-lg p-2.5 border transition-all
-                                                    ${slot.slotId === currentSlot
-                                                        ? "border-amber-500/50 bg-amber-500/5"
-                                                        : "border-slate-700 bg-slate-800/40"}`}>
-                                                <div className="flex items-center gap-1.5 mb-1.5">
-                                                    <span className="w-3 h-3 rounded-full border border-slate-500 shrink-0"
-                                                          style={{backgroundColor: slot.materialColor || "#444",
-                                                                  opacity: slot.hasFilament ? 1 : 0.3}}/>
-                                                    <span className="font-mono text-xs text-slate-400">S{slot.slotId}</span>
-                                                    {slot.slotId === currentSlot && (
-                                                        <span className="font-mono text-xs text-amber-400 ml-auto">●</span>
-                                                    )}
-                                                </div>
-                                                <div className={`font-mono text-xs ${slot.hasFilament ? "text-slate-200" : "text-slate-600"}`}>
-                                                    {slot.hasFilament ? slot.materialName : "Empty"}
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Extra stats */}
-                            <div className="px-4 sm:px-5 pb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 border-t border-slate-700/40 pt-4">
-                                <Stat label="Speed" value={printer?.current_speed != null ? `${printer.current_speed} mm/s (${printer?.print_speed ?? 100}%)` : "—"} mono/>
-                                <Stat label="Cooling fan" value={printer?.cooling_fan != null ? `${printer.cooling_fan}%` : "—"} mono/>
-                                <Stat label="Chamber fan" value={printer?.chamber_fan != null ? `${printer.chamber_fan}%` : "—"} mono/>
-                                <Stat label="Z offset" value={printer?.z_offset != null ? `${printer.z_offset}mm` : "—"} mono/>
-                                <Stat label="Door" value={printer?.door_open ? "Open" : "Closed"} mono
-                                      color={printer?.door_open ? "text-orange-400" : "text-slate-400"}/>
-                                <Stat label="Filament left"
-                                      value={printer?.estimated_right_len ? `${Math.round(printer.estimated_right_len)}mm` : "—"} mono/>
-                                <Stat label="Lifetime filament" value={printer?.cumulative_filament ? `${(printer.cumulative_filament/1000).toFixed(1)}m` : "—"} mono/>
-                                <Stat label="Lifetime time" value={printer?.cumulative_time ? fmt_mins(printer.cumulative_time * 60) : "—"} mono/>
-                                <Stat label="Firmware" value={printer?.firmware} mono/>
-                            </div>
-                        </div>
-                    )}
+                  ))}
                 </div>
-            </>
-        );
-    }
+              </div>
+            )}
 
-    // ── Job Card ─────────────────────────────────────────────────────────
-    function JobCard({job, onDelete, onRequeue, onSend, onChangeMappings, liveSlots, isNext}) {
-        const mappings = job.material_mappings || [];
-        const thumbUrl = `${API}/queue/${job.id}/thumbnail`;
-        const [thumbOk, setThumbOk] = useState(true);
-        const [acting, setActing] = useState(null);
-        const [showPicker, setShowPicker] = useState(false);
+            {/* Extra stats */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:1,background:C.border}}>
+              {[
+                {label:"Speed",         value: printer?.current_speed!=null ? `${printer.current_speed} mm/s (${printer?.print_speed??100}%)` : "—"},
+                {label:"Cooling fan",   value: printer?.cooling_fan!=null ? `${printer.cooling_fan}%` : "—"},
+                {label:"Chamber fan",   value: printer?.chamber_fan!=null ? `${printer.chamber_fan}%` : "—"},
+                {label:"Z offset",      value: printer?.z_offset!=null ? `${printer.z_offset}mm` : "—"},
+                {label:"Door",          value: printer?.door_open ? "Open" : "Closed"},
+                {label:"Filament left", value: printer?.estimated_right_len ? `${Math.round(printer.estimated_right_len)}mm` : "—"},
+                {label:"Lifetime filament", value: printer?.cumulative_filament ? `${(printer.cumulative_filament/1000).toFixed(1)}m` : "—"},
+                {label:"Firmware",      value: printer?.firmware},
+              ].map(s => (
+                <div key={s.label} style={{background:C.surface,padding:"10px 16px"}}>
+                  <Stat label={s.label} value={s.value} mono/>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </>
+  );
+}
 
-        async function doAction(name, fn) {
-            setActing(name);
-            try { await fn(); } finally { setActing(null); }
-        }
+// ── Job Card ──────────────────────────────────────────────────────────────────
+function JobCard({
+  job, onDelete, onRequeue, onSend, onChangeMappings, liveSlots, isNext }) {
+  const C = useC();
+  const mappings   = job.material_mappings || [];
+  const thumbUrl   = `${API}/queue/${job.id}/thumbnail`;
+  const [thumbOk, setThumbOk] = useState(true);
+  const [acting,  setActing]  = useState(null);
+  const [showPicker, setShowPicker] = useState(false);
 
-        const isQueued  = job.status === "queued";
-        const isSending = job.status === "sending";
+  async function doAction(name, fn) {
+    setActing(name);
+    try { await fn(); } finally { setActing(null); }
+  }
 
-        return (
-            <>
-                {showPicker && (
-                    <FilamentPicker
-                        job={job}
-                        liveSlots={liveSlots}
+  const isQueued  = job.status === "queued";
+  const isSending = job.status === "sending";
+
+  return (
+    <>
+      {showPicker && (
+        <FilamentPicker job={job} liveSlots={liveSlots}
                         onSave={onChangeMappings}
                         onClose={() => setShowPicker(false)}/>
-                )}
-            <div className={`rounded-lg border transition-all duration-200
-          ${isNext
-                ? "border-amber-500/50 bg-amber-500/5 shadow-[0_0_20px_rgba(245,158,11,0.08)]"
-                : "border-slate-700 bg-slate-800/40 hover:border-slate-600"}`}>
+      )}
+      <div className="elev-1" style={{
+        background:C.surface, borderRadius:10, overflow:"hidden",
+        border: isNext ? `2px solid ${C.teal}` : `1px solid ${C.border}`,
+      }}>
+        {/* Header */}
+        <div style={{
+          padding:"10px 14px",
+          display:"flex",flexDirection:"column",gap:8,
+          borderBottom:`1px solid ${C.border}`,
+        }} className="sm-row">
+          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
+            {isNext && (
+              <span style={{
+                fontSize:10,fontWeight:700,color:C.teal,
+                background:C.tealLight,padding:"2px 7px",borderRadius:99,
+                textTransform:"uppercase",letterSpacing:"0.06em",flexShrink:0,
+              }}>Next</span>
+            )}
+            <span style={{
+              fontSize:13,fontWeight:500,color:C.textPri,
+              overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
+            }} title={job.filename}>{job.filename}</span>
+          </div>
 
-                {/* Header */}
-                <div className="px-3 sm:px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-700/60">
-                    {/* Filename row */}
-                    <div className="flex items-center gap-2 min-w-0">
-                        {isNext && (
-                            <span className="shrink-0 text-xs font-mono text-amber-400 border border-amber-400/40 px-1.5 py-0.5 rounded bg-amber-400/10">
-                                NEXT
-                            </span>
-                        )}
-                        <span className="font-mono text-sm text-slate-200 truncate" title={job.filename}>
-                            {job.filename}
-                        </span>
-                    </div>
-                    {/* Actions row */}
-                    <div className="flex items-center gap-1.5 shrink-0">
-                        <Badge status={job.status}/>
-                        {!isQueued && !isSending && (
-                            <button onClick={() => doAction("requeue", () => onRequeue(job.id))}
-                                    disabled={!!acting}
-                                    className="px-2 py-1 rounded text-xs font-mono text-slate-400 hover:text-amber-400 hover:bg-amber-400/10 border border-transparent hover:border-amber-400/30 transition-all disabled:opacity-40">
-                                {acting === "requeue" ? "…" : "Requeue"}
-                            </button>
-                        )}
-                        {/* Change Filament — only on queued jobs with mappings */}
-                        {isQueued && (job.material_mappings?.length > 0 || job.tool_count > 1) && (
-                            <button onClick={() => setShowPicker(true)}
-                                    className="px-2 py-1 rounded text-xs font-mono text-slate-400 hover:text-purple-400 hover:bg-purple-400/10 border border-transparent hover:border-purple-400/30 transition-all">
-                                Filament
-                            </button>
-                        )}
-                        {!isSending && job.status !== "deleted" && (
-                            <button onClick={() => doAction("send", () => onSend(job.id))}
-                                    disabled={!!acting}
-                                    className="px-2 py-1 rounded text-xs font-mono text-slate-400 hover:text-green-400 hover:bg-green-400/10 border border-transparent hover:border-green-400/30 transition-all disabled:opacity-40">
-                                {acting === "send" ? "…" : "Send Now"}
-                            </button>
-                        )}
-                        {job.status !== "deleted" && (
-                            <button onClick={() => doAction("delete", () => onDelete(job.id))}
-                                    disabled={!!acting}
-                                    className="px-2 py-1 rounded text-xs font-mono text-slate-400 hover:text-red-400 hover:bg-red-400/10 border border-transparent hover:border-red-400/30 transition-all disabled:opacity-40">
-                                {acting === "delete" ? "…" : "Remove"}
-                            </button>
-                        )}
-                    </div>
-                </div>
-
-                <div className="flex gap-3 sm:gap-4 px-3 sm:px-4 py-3">
-                    {/* Thumbnail */}
-                    {thumbOk && (
-                        <div className="shrink-0 w-16 h-16 sm:w-24 sm:h-24 rounded overflow-hidden border border-slate-700 bg-slate-900 flex items-center justify-center">
-                            <img src={thumbUrl}
-                                 alt="Model preview"
-                                 className="w-full h-full object-contain"
-                                 onError={() => setThumbOk(false)}/>
-                        </div>
-                    )}
-
-                    {/* Stats */}
-                    <div className="flex-1 flex flex-wrap gap-x-6 gap-y-2 content-start">
-                        <Stat label="Size" value={fmt_size(job.file_size)} mono/>
-                        <Stat label="Time" value={fmt_time(job.printing_time)} mono/>
-                        <Stat label="Layers" value={job.total_layers || "—"} mono/>
-                        <Stat label="Tools" value={job.tool_count ?? "—"} mono/>
-                        <Stat label="Queued" value={fmt_date(job.created_at)}/>
-                        {job.sent_at && <Stat label="Sent" value={fmt_date(job.sent_at)}/>}
-                    </div>
-                </div>
-
-                {mappings.length > 0 && (
-                    <div className="px-3 sm:px-4 pb-3 flex flex-wrap gap-2">
-                        {mappings.map((m, i) => (
-                            <div key={i}
-                                 className="flex items-center gap-1.5 px-2 py-1 rounded bg-slate-700/60 border border-slate-600/50 text-xs font-mono">
-                  <span className="w-3 h-3 rounded-full border border-slate-500 shrink-0"
-                        style={{backgroundColor: m.slotMaterialColor || m.toolMaterialColor || "#888"}}/>
-                                <span className="text-slate-400">T{m.toolId}</span>
-                                <span className="text-slate-600">→</span>
-                                <span className="text-slate-300">S{m.slotId}</span>
-                                <span className="text-slate-500 ml-0.5">{m.materialName}</span>
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {job.error && (
-                    <div className="mx-3 sm:mx-4 mb-3 px-3 py-2 rounded bg-red-950/60 border border-red-500/30 text-xs font-mono text-red-400">
-                        {job.error}
-                    </div>
-                )}
-            </div>
-            </>
-        );
-    }
-
-    // ── Filament Picker Modal ─────────────────────────────────────────────
-    function FilamentPicker({job, liveSlots, onSave, onClose}) {
-        // Initialise selections from current mappings
-        const [selections, setSelections] = useState(() => {
-            const map = {};
-            (job.material_mappings || []).forEach(m => {
-                map[m.toolId] = {...m};
-            });
-            return map;
-        });
-
-        const toolCount = job.tool_count || (job.material_mappings || []).length || 1;
-        const tools = Array.from({length: toolCount}, (_, i) => i);
-
-        function selectSlot(toolId, slot) {
-            setSelections(prev => ({
-                ...prev,
-                [toolId]: {
-                    ...prev[toolId],
-                    toolId,
-                    slotId:            slot.slotId,
-                    materialName:      slot.materialName,
-                    slotMaterialColor: slot.materialColor,
-                    toolMaterialColor: slot.materialColor,
-                },
-            }));
-        }
-
-        async function save() {
-            const mappings = Object.values(selections);
-            await onSave(job.id, mappings);
-            onClose();
-        }
-
-        return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-                 style={{background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)"}}
-                 onClick={onClose}>
-                <div className="rounded-xl border border-slate-700 bg-slate-900 w-full max-w-md shadow-2xl"
-                     onClick={e => e.stopPropagation()}>
-
-                    {/* Header */}
-                    <div className="px-5 py-4 border-b border-slate-700 flex items-center justify-between">
-                        <div>
-                            <div className="font-mono text-sm font-bold text-slate-100">Change Filament</div>
-                            <div className="font-mono text-xs text-slate-500 mt-0.5 truncate max-w-[280px]"
-                                 title={job.filename}>{job.filename}</div>
-                        </div>
-                        <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition-colors p-1">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
-                            </svg>
-                        </button>
-                    </div>
-
-                    {/* Tool → Slot assignments */}
-                    <div className="px-5 py-4 space-y-5">
-                        {tools.map(toolId => {
-                            const current = selections[toolId];
-                            return (
-                                <div key={toolId}>
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <span className="font-mono text-xs text-slate-400 uppercase tracking-wider">
-                                            Tool {toolId}
-                                        </span>
-                                        {current && (
-                                            <div className="flex items-center gap-1.5 ml-2">
-                                                <span className="w-3 h-3 rounded-full border border-slate-500"
-                                                      style={{backgroundColor: current.slotMaterialColor || "#888"}}/>
-                                                <span className="font-mono text-xs text-slate-400">
-                                                    → S{current.slotId} {current.materialName}
-                                                </span>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Slot buttons */}
-                                    {liveSlots.length > 0 ? (
-                                        <div className="grid grid-cols-4 gap-2">
-                                            {liveSlots.map(slot => {
-                                                const selected = current?.slotId === slot.slotId;
-                                                return (
-                                                    <button key={slot.slotId}
-                                                            onClick={() => selectSlot(toolId, slot)}
-                                                            disabled={!slot.hasFilament}
-                                                            className={`rounded-lg p-2.5 border text-left transition-all disabled:opacity-30 disabled:cursor-not-allowed
-                                                                ${selected
-                                                                    ? "border-amber-500/70 bg-amber-500/10"
-                                                                    : "border-slate-700 bg-slate-800/60 hover:border-slate-500"}`}>
-                                                        <div className="flex items-center gap-1.5 mb-1">
-                                                            <span className="w-3.5 h-3.5 rounded-full border border-slate-500 shrink-0"
-                                                                  style={{backgroundColor: slot.materialColor || "#444"}}/>
-                                                            {selected && <span className="text-amber-400 text-xs ml-auto">✓</span>}
-                                                        </div>
-                                                        <div className="font-mono text-xs text-slate-300">S{slot.slotId}</div>
-                                                        <div className={`font-mono text-xs mt-0.5 ${slot.hasFilament ? "text-slate-400" : "text-slate-600"}`}>
-                                                            {slot.hasFilament ? slot.materialName : "Empty"}
-                                                        </div>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    ) : (
-                                        <div className="font-mono text-xs text-slate-500 py-2">
-                                            Printer offline — slot data unavailable
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-
-                    {/* Footer */}
-                    <div className="px-5 py-4 border-t border-slate-700 flex justify-end gap-2">
-                        <button onClick={onClose}
-                                className="px-4 py-2 rounded font-mono text-sm text-slate-400 hover:text-slate-200 border border-transparent hover:border-slate-600 transition-all">
-                            Cancel
-                        </button>
-                        <button onClick={save}
-                                className="px-4 py-2 rounded font-mono text-sm font-medium bg-amber-500 hover:bg-amber-400 text-slate-900 border border-amber-400 transition-all">
-                            Save mappings
-                        </button>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-    function QueueList({queued, display, nextId, liveSlots, onDelete, onRequeue, onSend, onChangeMappings, onReorder}) {
-        const [dragId, setDragId] = useState(null);
-        const [overId, setOverId] = useState(null);
-
-        const nonQueued = display.filter(j => j.status !== "queued");
-
-        function handleDragStart(e, id) {
-            setDragId(id);
-            e.dataTransfer.effectAllowed = "move";
-        }
-
-        function handleDragOver(e, id) {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
-            if (id !== dragId) setOverId(id);
-        }
-
-        function handleDrop(e, targetId) {
-            e.preventDefault();
-            if (dragId === targetId) {
-                setDragId(null);
-                setOverId(null);
-                return;
-            }
-            const ids = queued.map(j => j.id);
-            const from = ids.indexOf(dragId);
-            const to = ids.indexOf(targetId);
-            if (from === -1 || to === -1) return;
-            const reordered = [...ids];
-            reordered.splice(from, 1);
-            reordered.splice(to, 0, dragId);
-            setDragId(null);
-            setOverId(null);
-            onReorder(reordered);
-        }
-
-        function handleDragEnd() {
-            setDragId(null);
-            setOverId(null);
-        }
-
-        if (display.length === 0) return <EmptyQueue/>;
-
-        return (
-            <div className="space-y-3">
-                {queued.map(job => (
-                    <div key={job.id}
-                         draggable
-                         onDragStart={e => handleDragStart(e, job.id)}
-                         onDragOver={e => handleDragOver(e, job.id)}
-                         onDrop={e => handleDrop(e, job.id)}
-                         onDragEnd={handleDragEnd}
-                         className={`transition-all duration-150 rounded-lg
-                   ${dragId === job.id ? "opacity-40 scale-[0.98]" : ""}
-                   ${overId === job.id && dragId !== job.id
-                             ? "ring-2 ring-amber-400/60 ring-offset-2 ring-offset-slate-900"
-                             : ""}`}>
-                        <div className="flex items-stretch gap-0">
-                            <div
-                                className="flex items-center px-2 cursor-grab active:cursor-grabbing text-slate-600 hover:text-slate-400 transition-colors shrink-0">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                                          d="M4 8h16M4 16h16"/>
-                                </svg>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <JobCard job={job} onDelete={onDelete} onRequeue={onRequeue}
-                                         onSend={onSend} onChangeMappings={onChangeMappings}
-                                         liveSlots={liveSlots} isNext={job.id === nextId}/>
-                            </div>
-                        </div>
-                    </div>
-                ))}
-
-                {nonQueued.map(job => (
-                    <JobCard key={job.id} job={job} onDelete={onDelete}
-                             onRequeue={onRequeue} onSend={onSend}
-                             onChangeMappings={onChangeMappings}
-                             liveSlots={liveSlots} isNext={job.id === nextId}/>
-                ))}
-            </div>
-        );
-    }
-
-    function EmptyQueue() {
-        return (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-                <svg className="w-12 h-12 text-slate-800 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
-                          d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
+          <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,flexWrap:"wrap"}}>
+            <StatusChip status={job.status}/>
+            {isQueued && (mappings.length > 0 || job.tool_count > 1) && (
+              <button onClick={() => setShowPicker(true)} className="ripple" style={{
+                fontSize:12,fontWeight:500,color:C.teal,
+                background:C.tealLight,border:`1px solid ${C.teal}20`,
+                padding:"3px 10px",borderRadius:99,cursor:"pointer",
+              }}>Filament</button>
+            )}
+            {!isQueued && !isSending && (
+              <button onClick={() => doAction("requeue",()=>onRequeue(job.id))}
+                      disabled={!!acting} className="ripple" style={{
+                fontSize:12,color:C.textSec,background:C.bg,
+                border:`1px solid ${C.border}`,padding:"3px 10px",
+                borderRadius:99,cursor:"pointer",opacity:acting?0.5:1,
+              }}>{acting==="requeue"?"…":"Requeue"}</button>
+            )}
+            {!isSending && job.status!=="deleted" && (
+              <button onClick={() => doAction("send",()=>onSend(job.id))}
+                      disabled={!!acting} className="ripple" style={{
+                fontSize:12,fontWeight:500,color:C.success,
+                background:C.successBg,border:`1px solid ${C.success}25`,
+                padding:"3px 10px",borderRadius:99,cursor:"pointer",opacity:acting?0.5:1,
+              }}>{acting==="send"?"…":"Send Now"}</button>
+            )}
+            {job.status!=="deleted" && (
+              <IconBtn onClick={() => doAction("delete",()=>onDelete(job.id))}
+                       title="Remove" danger icon={
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
                 </svg>
-                <p className="font-mono text-slate-500 text-sm">Queue is empty</p>
-                <p className="font-mono text-slate-600 text-xs mt-1">Upload a job from OrcaSlicer to get started</p>
+              }/>
+            )}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{display:"flex",gap:12,padding:"12px 14px"}}>
+          {thumbOk && (
+            <div style={{
+              width:60,height:60,borderRadius:8,flexShrink:0,
+              overflow:"hidden",border:`1px solid ${C.border}`,background:C.bg,
+            }}>
+              <img src={thumbUrl} alt="Model"
+                   style={{width:"100%",height:"100%",objectFit:"contain"}}
+                   onError={() => setThumbOk(false)}/>
             </div>
-        );
+          )}
+          <div style={{display:"flex",flexWrap:"wrap",gap:"8px 24px",alignContent:"start"}}>
+            <Stat label="Size"   value={fmt_size(job.file_size)} mono/>
+            <Stat label="Time"   value={fmt_time(job.printing_time)} mono/>
+            <Stat label="Layers" value={job.total_layers||"—"} mono/>
+            <Stat label="Tools"  value={job.tool_count??"—"} mono/>
+            <Stat label="Queued" value={fmt_date(job.created_at)}/>
+            {job.sent_at && <Stat label="Sent" value={fmt_date(job.sent_at)}/>}
+          </div>
+        </div>
+
+        {/* Material mappings */}
+        {mappings.length > 0 && (
+          <div style={{
+            padding:"8px 14px 12px",
+            display:"flex",flexWrap:"wrap",gap:6,
+            borderTop:`1px solid ${C.border}`,
+          }}>
+            {mappings.map((m,i) => (
+              <div key={i} style={{
+                display:"flex",alignItems:"center",gap:6,
+                padding:"4px 10px",borderRadius:99,
+                background:C.bg,border:`1px solid ${C.border}`,
+                fontSize:12,
+              }}>
+                <span style={{width:10,height:10,borderRadius:"50%",background:m.slotMaterialColor||m.toolMaterialColor||"#ccc",border:`1px solid ${C.border}`,display:"inline-block"}}/>
+                <span style={{color:C.textSec}}>T{m.toolId}</span>
+                <span style={{color:C.textMuted}}>→</span>
+                <span style={{color:C.textPri,fontWeight:500}}>S{m.slotId}</span>
+                <span style={{color:C.textMuted}}>{m.materialName}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Error */}
+        {job.error && (
+          <div style={{
+            margin:"0 14px 12px",padding:"10px 14px",
+            borderRadius:6,background:C.errorBg,color:C.error,fontSize:12,
+          }}>{job.error}</div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ── Queue List ────────────────────────────────────────────────────────────────
+function QueueList({
+  queued, display, nextId, liveSlots, onDelete, onRequeue, onSend, onChangeMappings, onReorder }) {
+  const C = useC();
+  const [dragId, setDragId] = useState(null);
+  const [overId, setOverId] = useState(null);
+  const nonQueued = display.filter(j => j.status !== "queued");
+
+  function handleDragStart(e, id) { setDragId(id); e.dataTransfer.effectAllowed="move"; }
+  function handleDragOver(e, id)  { e.preventDefault(); if(id!==dragId) setOverId(id); }
+  function handleDragEnd()        { setDragId(null); setOverId(null); }
+  function handleDrop(e, targetId) {
+    e.preventDefault();
+    if (dragId===targetId) { setDragId(null); setOverId(null); return; }
+    const ids = queued.map(j=>j.id);
+    const from = ids.indexOf(dragId), to = ids.indexOf(targetId);
+    if (from===-1||to===-1) return;
+    const reordered = [...ids];
+    reordered.splice(from,1);
+    reordered.splice(to,0,dragId);
+    setDragId(null); setOverId(null);
+    onReorder(reordered);
+  }
+
+  if (display.length===0) return (
+    <div style={{textAlign:"center",padding:"48px 24px",color:C.textMuted}}>
+      <svg width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{margin:"0 auto 12px",display:"block",opacity:0.3}}>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
+          d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/>
+      </svg>
+      <div style={{fontSize:14,fontWeight:500}}>Queue is empty</div>
+      <div style={{fontSize:13,marginTop:4}}>Upload a job from OrcaSlicer to get started</div>
+    </div>
+  );
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {queued.map(job => (
+        <div key={job.id}
+             draggable
+             onDragStart={e=>handleDragStart(e,job.id)}
+             onDragOver={e=>handleDragOver(e,job.id)}
+             onDrop={e=>handleDrop(e,job.id)}
+             onDragEnd={handleDragEnd}
+             style={{
+               display:"flex", gap:0, alignItems:"stretch",
+               opacity: dragId===job.id ? 0.45 : 1,
+               outline: overId===job.id&&dragId!==job.id ? `2px solid ${C.teal}` : "none",
+               outlineOffset:2, borderRadius:10,
+               transition:"opacity 0.15s",
+             }}>
+          <div style={{
+            display:"flex",alignItems:"center",paddingLeft:4,paddingRight:8,
+            cursor:"grab",color:C.textMuted,flexShrink:0,
+          }}>
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16"/>
+            </svg>
+          </div>
+          <div style={{flex:1,minWidth:0}}>
+            <JobCard job={job} onDelete={onDelete} onRequeue={onRequeue}
+                     onSend={onSend} onChangeMappings={onChangeMappings}
+                     liveSlots={liveSlots} isNext={job.id===nextId}/>
+          </div>
+        </div>
+      ))}
+      {nonQueued.map(job => (
+        <JobCard key={job.id} job={job} onDelete={onDelete}
+                 onRequeue={onRequeue} onSend={onSend}
+                 onChangeMappings={onChangeMappings}
+                 liveSlots={liveSlots} isNext={job.id===nextId}/>
+      ))}
+    </div>
+  );
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
+function App() {
+  const [dark, setDark] = useState(() => {
+    try { return localStorage.getItem("pq-dark") === "1"; } catch { return false; }
+  });
+  const C = makepalette(dark);
+
+  function toggleDark() {
+    setDark(v => {
+      const next = !v;
+      try { localStorage.setItem("pq-dark", next ? "1" : "0"); } catch {}
+      return next;
+    });
+  }
+  const [status,        setStatus]        = useState(null);
+  const [jobs,          setJobs]          = useState([]);
+  const [toasts,        setToasts]        = useState([]);
+  const [loadingStatus, setLoadingStatus] = useState(true);
+  const [loadingAction, setLoadingAction] = useState(null);
+  const [showDeleted,   setShowDeleted]   = useState(false);
+
+  const toast = useCallback((msg, type="success") => {
+    const id = Date.now();
+    setToasts(t=>[...t,{id,msg,type}]);
+    setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),3500);
+  },[]);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [sr,jr] = await Promise.all([
+        fetch(`${API}/queue/status`),
+        fetch(`${API}/queue?include_deleted=true`),
+      ]);
+      setStatus(await sr.json());
+      setJobs((await jr.json()).jobs||[]);
+    } catch {
+      setStatus(s=>s?{...s,printer:{state:"offline"}}:null);
+    } finally {
+      setLoadingStatus(false);
     }
+  },[]);
 
-    // ── App ───────────────────────────────────────────────────────────────
-    function App() {
-        const [status, setStatus] = useState(null);
-        const [jobs, setJobs] = useState([]);
-        const [toasts, setToasts] = useState([]);
-        const [loadingStatus, setLoadingStatus] = useState(true);
-        const [loadingAction, setLoadingAction] = useState(null);
-        const [showDeleted, setShowDeleted] = useState(false);
+  useEffect(()=>{ refresh(); const id=setInterval(refresh,5000); return ()=>clearInterval(id); },[refresh]);
 
-        const toast = useCallback((msg, type = "success") => {
-            const id = Date.now();
-            setToasts(t => [...t, {id, msg, type}]);
-            setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500);
-        }, []);
+  async function action(name, url, method="POST", successMsg) {
+    setLoadingAction(name);
+    try {
+      const r = await fetch(`${API}${url}`,{method});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail||"Failed");
+      toast(successMsg?successMsg(d):"Done");
+      await refresh();
+    } catch(e) { toast(e.message,"error"); }
+    finally { setLoadingAction(null); }
+  }
 
-        const refresh = useCallback(async () => {
-            try {
-                const [sr, jr] = await Promise.all([
-                    fetch(`${API}/queue/status`),
-                    fetch(`${API}/queue?include_deleted=true`),
-                ]);
-                setStatus(await sr.json());
-                setJobs((await jr.json()).jobs || []);
-            } catch {
-                setStatus(s => s ? {...s, printer: {state: "offline"}} : null);
-            } finally {
-                setLoadingStatus(false);
+  const sendNext   = () => action("next",  "/queue/next",    "POST", d=>`Sent: ${d.job?.filename}`);
+  const clearQueue = () => action("clear", "/queue/clear",   "POST", d=>`Cleared ${d.cleared} job${d.cleared!==1?"s":""}`);
+  const purge      = () => action("purge", "/queue/cleanup", "POST", d=>`Purged ${d.purged_rows} rows, ${d.removed_files.length} files`);
+
+  async function deleteJob(id) {
+    try { await fetch(`${API}/queue/${id}`,{method:"DELETE"}); await refresh(); }
+    catch(e) { toast(e.message,"error"); }
+  }
+  async function requeueJob(id) {
+    try {
+      const r = await fetch(`${API}/queue/${id}/requeue`,{method:"POST"});
+      if (!r.ok) throw new Error((await r.json()).detail||"Failed");
+      toast("Job requeued"); await refresh();
+    } catch(e) { toast(e.message,"error"); }
+  }
+  async function sendSpecific(id) {
+    try {
+      const r = await fetch(`${API}/queue/${id}/send`,{method:"POST"});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail||"Failed");
+      toast(`Sent: ${d.job?.filename}`); await refresh();
+    } catch(e) { toast(e.message,"error"); }
+  }
+  async function changeMappings(id, mappings) {
+    try {
+      const r = await fetch(`${API}/queue/${id}/mappings`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({material_mappings:mappings}),
+      });
+      if (!r.ok) throw new Error((await r.json()).detail||"Failed");
+      toast("Filament mappings updated"); await refresh();
+    } catch(e) { toast(e.message,"error"); }
+  }
+  async function controlPrinter(cmd, args) {
+    try {
+      const r = await fetch(`${API}/printer/control`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({cmd,args}),
+      });
+      const d = await r.json();
+      if (d.code!==0) throw new Error(d.message||"Command failed");
+      await refresh();
+    } catch(e) { toast(e.message,"error"); }
+  }
+
+  const queued   = jobs.filter(j=>j.status==="queued");
+  const sending  = jobs.filter(j=>j.status==="sending");
+  const sent     = jobs.filter(j=>j.status==="sent");
+  const errors   = jobs.filter(j=>j.status==="error");
+  const deleted  = jobs.filter(j=>j.status==="deleted");
+  const hasActive = queued.length>0||sending.length>0;
+  const nextId    = status?.next_job?.id;
+  const display   = [
+    ...sending,...errors,...queued,
+    ...[...sent].sort((a,b)=>(b.sent_at??0)-(a.sent_at??0)),
+    ...(showDeleted?[...deleted].reverse():[]),
+  ];
+
+  const statItems = [
+    {label:"Queued",  val:queued.length,  color:C.info},
+    {label:"Sending", val:sending.length, color:C.teal},
+    {label:"Sent",    val:sent.length,    color:C.success},
+    {label:"Errors",  val:errors.length,  color:C.error},
+  ];
+
+  return (
+    <ThemeCtx.Provider value={C}>
+    <div style={{
+      minHeight:"100vh", background:C.bg, fontFamily:"'Roboto',sans-serif",
+      "--bg": C.bg, "--border": C.border,
+    }}>
+
+      {/* App bar */}
+      <header style={{
+        background:C.primary,color:"#fff",
+        padding:"0 16px",
+        height:56,
+        display:"flex",alignItems:"center",justifyContent:"space-between",
+        position:"sticky",top:0,zIndex:40,
+        boxShadow:"0 2px 8px rgba(0,0,0,0.2)",
+      }}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24" opacity={0.9}>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+              d="M17 17H7a2 2 0 01-2-2V5a2 2 0 012-2h10a2 2 0 012 2v10a2 2 0 01-2 2z"/>
+          </svg>
+          <span style={{fontWeight:500,fontSize:16,letterSpacing:"0.01em"}}>Print Queue</span>
+          <span style={{fontSize:12,opacity:0.55}}>AD5X</span>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:12,opacity:0.5,marginRight:4}}>{jobs.length} job{jobs.length!==1?"s":""}</span>
+          <Btn onClick={sendNext} disabled={!hasActive} loading={loadingAction==="next"}
+               variant="primary" size="sm">
+            <span className="sm-show">Send Next</span>
+            <span className="sm-hide">Send</span>
+          </Btn>
+          <Btn onClick={clearQueue} disabled={!hasActive} loading={loadingAction==="clear"}
+               variant="ghost" size="sm" title="Clear queue">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+            <span className="sm-show">Clear</span>
+          </Btn>
+          <Btn onClick={purge} loading={loadingAction==="purge"}
+               variant="ghost" size="sm" title="Purge deleted jobs and files">
+            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+            <span className="sm-show">Purge</span>
+          </Btn>
+          {/* Dark mode toggle */}
+          <button onClick={toggleDark} title={dark ? "Switch to light mode" : "Switch to dark mode"}
+                  className="ripple" style={{
+            background:"none",border:"none",cursor:"pointer",
+            color:"rgba(255,255,255,0.7)",padding:"6px",borderRadius:20,
+            display:"flex",alignItems:"center",
+          }}>
+            {dark
+              ? <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707M17.657 17.657l-.707-.707M6.343 6.343l-.707-.707M12 7a5 5 0 100 10A5 5 0 0012 7z"/>
+                </svg>
+              : <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+                </svg>
             }
-        }, []);
+          </button>
+        </div>
+      </header>
 
-        useEffect(() => {
-            refresh();
-            const id = setInterval(refresh, 5000);
-            return () => clearInterval(id);
-        }, [refresh]);
+      <main style={{maxWidth:800,margin:"0 auto",padding:"16px 12px",display:"flex",flexDirection:"column",gap:14}}>
 
-        async function action(name, url, method = "POST", successMsg) {
-            setLoadingAction(name);
-            try {
-                const r = await fetch(`${API}${url}`, {method});
-                const d = await r.json();
-                if (!r.ok) throw new Error(d.detail || "Failed");
-                toast(successMsg ? successMsg(d) : "Done");
-                await refresh();
-            } catch (e) {
-                toast(e.message, "error");
-            } finally {
-                setLoadingAction(null);
-            }
-        }
+        <PrinterPanel printer={status?.printer} loading={loadingStatus} onControl={controlPrinter}/>
 
-        async function controlPrinter(cmd, args) {
-            try {
-                const r = await fetch(`${API}/printer/control`, {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({cmd, args}),
-                });
-                const d = await r.json();
-                if (d.code !== 0) throw new Error(d.message || "Command failed");
-                await refresh();
-            } catch(e) {
-                toast(e.message, "error");
-            }
-        }
-
-        async function changeMappings(id, mappings) {
-            try {
-                const r = await fetch(`${API}/queue/${id}/mappings`, {
-                    method: "POST",
-                    headers: {"Content-Type": "application/json"},
-                    body: JSON.stringify({material_mappings: mappings}),
-                });
-                if (!r.ok) throw new Error((await r.json()).detail || "Failed");
-                toast("Filament mappings updated");
-                await refresh();
-            } catch(e) {
-                toast(e.message, "error");
-            }
-        }
-
-        const sendNext = () => action("next", "/queue/next", "POST", d => `Sent: ${d.job?.filename}`);
-        const clearQueue = () => action("clear", "/queue/clear", "POST", d => `Cleared ${d.cleared} job${d.cleared !== 1 ? "s" : ""}`);
-        const purge = () => action("purge", "/queue/cleanup", "POST", d => `Purged ${d.purged_rows} rows, ${d.removed_files.length} files`);
-
-        async function deleteJob(id) {
-            try {
-                await fetch(`${API}/queue/${id}`, {method: "DELETE"});
-                await refresh();
-            } catch (e) {
-                toast(e.message, "error");
-            }
-        }
-
-        async function requeueJob(id) {
-            try {
-                const r = await fetch(`${API}/queue/${id}/requeue`, {method: "POST"});
-                if (!r.ok) throw new Error((await r.json()).detail || "Failed");
-                toast("Job requeued");
-                await refresh();
-            } catch (e) {
-                toast(e.message, "error");
-            }
-        }
-
-        async function sendSpecific(id) {
-            try {
-                const r = await fetch(`${API}/queue/${id}/send`, {method: "POST"});
-                const d = await r.json();
-                if (!r.ok) throw new Error(d.detail || "Failed");
-                toast(`Sent: ${d.job?.filename}`);
-                await refresh();
-            } catch (e) {
-                toast(e.message, "error");
-            }
-        }
-
-        const queued = jobs.filter(j => j.status === "queued");
-        const sending = jobs.filter(j => j.status === "sending");
-        const sent = jobs.filter(j => j.status === "sent");
-        const errors = jobs.filter(j => j.status === "error");
-        const deleted = jobs.filter(j => j.status === "deleted");
-        const hasActive = queued.length > 0 || sending.length > 0;
-        const nextId = status?.next_job?.id;
-        const display = [
-            ...sending, ...errors, ...queued,
-            ...[...sent].sort((a, b) => (b.sent_at ?? 0) - (a.sent_at ?? 0)),
-            ...(showDeleted ? [...deleted].reverse() : []),
-        ];
-
-        return (
-            <div className="min-h-screen" style={{background: "#0F1117", fontFamily: "'Inter',sans-serif"}}>
-
-                <header
-                    className="border-b border-slate-800 px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between sticky top-0 z-40"
-                    style={{background: "rgba(15,17,23,0.95)", backdropFilter: "blur(8px)"}}>
-                    <div className="flex items-center gap-2 sm:gap-3">
-                        <div className="w-7 h-7 rounded bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0">
-                            <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                                      d="M17 17H7a2 2 0 01-2-2V5a2 2 0 012-2h10a2 2 0 012 2v10a2 2 0 01-2 2z"/>
-                            </svg>
-                        </div>
-                        <span className="font-mono font-bold text-slate-100 tracking-tight">print queue</span>
-                        <span className="font-mono text-xs text-slate-600 hidden sm:block">AD5X</span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 sm:gap-2">
-                        <span className="font-mono text-xs text-slate-600 mr-1 hidden sm:block">
-                            {jobs.length} job{jobs.length !== 1 ? "s" : ""}
-                        </span>
-                        {/* Send Next — primary, always show text */}
-                        <Btn onClick={sendNext} disabled={!hasActive} loading={loadingAction === "next"} variant="primary">
-                            <span className="hidden sm:inline">Send Next</span>
-                            <span className="sm:hidden">Send</span>
-                        </Btn>
-                        {/* Clear — icon on mobile, text on sm+ */}
-                        <button onClick={clearQueue} disabled={!hasActive || loadingAction === "clear"}
-                                title="Clear queue"
-                                className="inline-flex items-center gap-1.5 px-2.5 sm:px-4 py-2 rounded font-mono text-sm font-medium border transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed bg-slate-700 hover:bg-slate-600 text-slate-100 border-slate-600">
-                            {loadingAction === "clear"
-                                ? <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-                                : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg>
-                            }
-                            <span className="hidden sm:inline">Clear Queue</span>
-                        </button>
-                        {/* Purge — icon on mobile, text on sm+ */}
-                        <button onClick={purge} disabled={loadingAction === "purge"}
-                                title="Purge deleted jobs"
-                                className="inline-flex items-center gap-1.5 px-2.5 sm:px-4 py-2 rounded font-mono text-sm font-medium border transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed bg-red-500/20 hover:bg-red-500/30 text-red-400 border-red-500/40">
-                            {loadingAction === "purge"
-                                ? <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-                                : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                            }
-                            <span className="hidden sm:inline">Purge</span>
-                        </button>
-                    </div>
-                </header>
-
-                <main className="max-w-4xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-5">
-
-                    <PrinterPanel printer={status?.printer} loading={loadingStatus} onControl={controlPrinter}/>
-
-                    {/* Stats strip — 2 col on mobile, 5 across on sm+ */}
-                    <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-2">
-                        {[
-                            {label: "Queued",  val: queued.length,  col: "text-amber-400"},
-                            {label: "Sending", val: sending.length, col: "text-blue-400"},
-                            {label: "Sent",    val: sent.length,    col: "text-green-400"},
-                            {label: "Errors",  val: errors.length,  col: "text-red-400"},
-                        ].map(s => (
-                            <div key={s.label}
-                                 className="flex-1 rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2.5 flex items-center gap-2.5 sm:flex-col sm:items-center sm:px-4 sm:py-3">
-                                <span className={`font-mono text-xl font-bold sm:text-2xl ${s.col}`}
-                                      style={{textShadow: "0 0 16px currentColor"}}>
-                                    {s.val}
-                                </span>
-                                <span className="font-mono text-xs text-slate-500 uppercase tracking-wider">{s.label}</span>
-                            </div>
-                        ))}
-
-                        {/* Removed toggle */}
-                        <button onClick={() => setShowDeleted(v => !v)}
-                                className={`col-span-2 sm:col-auto flex-1 rounded-lg border px-3 py-2.5 flex items-center gap-2.5 sm:flex-col sm:items-center sm:px-4 sm:py-3 transition-all
-                                    ${showDeleted
-                                        ? "border-slate-500 bg-slate-700/60"
-                                        : "border-slate-700 bg-slate-800/40 hover:border-slate-600"}`}>
-                            <span className={`font-mono text-xl font-bold sm:text-2xl ${showDeleted ? "text-slate-300" : "text-slate-600"}`}>
-                                {deleted.length}
-                            </span>
-                            <span className={`font-mono text-xs uppercase tracking-wider ${showDeleted ? "text-slate-400" : "text-slate-600"}`}>
-                                {showDeleted ? "Removed ✓" : "Removed"}
-                            </span>
-                        </button>
-                    </div>
-
-                    <QueueList
-                        queued={queued}
-                        display={display}
-                        nextId={nextId}
-                        liveSlots={status?.printer?.slot_infos || []}
-                        onDelete={deleteJob}
-                        onRequeue={requeueJob}
-                        onSend={sendSpecific}
-                        onChangeMappings={changeMappings}
-                        onReorder={async (orderedIds) => {
-                            try {
-                                await fetch(`${API}/queue/reorder`, {
-                                    method: "POST",
-                                    headers: {"Content-Type": "application/json"},
-                                    body: JSON.stringify({order: orderedIds}),
-                                });
-                                await refresh();
-                            } catch (e) {
-                                toast(e.message, "error");
-                            }
-                        }}
-                    />
-                </main>
-
-                <Toast toasts={toasts}/>
+        {/* Stats strip */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}} className="stats-grid">
+          {statItems.map(s => (
+            <div key={s.label} className="elev-1" style={{
+              background:C.surface,borderRadius:10,padding:"12px 16px",
+              display:"flex",alignItems:"center",gap:12,
+            }}>
+              <span style={{fontSize:24,fontWeight:700,color:s.color,minWidth:32}}>{s.val}</span>
+              <span style={{fontSize:12,color:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",fontWeight:500}}>{s.label}</span>
             </div>
-        );
-    }
+          ))}
+          <button onClick={()=>setShowDeleted(v=>!v)}
+                  className="elev-1 ripple"
+                  style={{
+                    gridColumn:"span 2",
+                    background: showDeleted ? C.bg : C.surface,
+                    borderRadius:10, padding:"12px 16px",
+                    display:"flex",alignItems:"center",gap:12,
+                    border: showDeleted ? `1.5px solid ${C.border}` : `1px solid ${C.border}`,
+                    cursor:"pointer",
+                  }}>
+            <span style={{fontSize:24,fontWeight:700,color:showDeleted?C.textSec:C.textMuted,minWidth:32}}>
+              {deleted.length}
+            </span>
+            <span style={{fontSize:12,color:showDeleted?C.textSec:C.textMuted,textTransform:"uppercase",letterSpacing:"0.05em",fontWeight:500}}>
+              {showDeleted?"Removed (shown)":"Removed"}
+            </span>
+          </button>
+        </div>
 
-    const root = ReactDOM.createRoot(document.getElementById("root"));
-    root.render(<App/>);
+        {/* Job list */}
+        <QueueList
+          queued={queued} display={display} nextId={nextId}
+          liveSlots={status?.printer?.slot_infos||[]}
+          onDelete={deleteJob} onRequeue={requeueJob}
+          onSend={sendSpecific} onChangeMappings={changeMappings}
+          onReorder={async (orderedIds) => {
+            try {
+              await fetch(`${API}/queue/reorder`,{
+                method:"POST",
+                headers:{"Content-Type":"application/json"},
+                body:JSON.stringify({order:orderedIds}),
+              });
+              await refresh();
+            } catch(e) { toast(e.message,"error"); }
+          }}
+        />
+      </main>
+
+      <Toast toasts={toasts}/>
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (min-width: 640px) {
+          .stats-grid { grid-template-columns: repeat(5, 1fr) !important; }
+          .stats-grid > button { grid-column: span 1 !important; }
+          .sm-show { display: inline !important; }
+          .sm-hide { display: none !important; }
+          .sm-row { flex-direction: row !important; align-items: center !important; }
+        }
+        @media (max-width: 639px) {
+          .sm-show { display: none; }
+          .sm-hide { display: inline; }
+          .sm-row { }
+        }
+        .ripple { position: relative; overflow: hidden; }
+        .ripple::after {
+          content: ''; position: absolute; inset: 0;
+          background: currentColor; opacity: 0; transition: opacity 0.15s;
+          pointer-events: none;
+        }
+        .ripple:hover::after { opacity: 0.06; }
+        .ripple:active::after { opacity: 0.14; }
+      `}</style>
+    </div>
+    </ThemeCtx.Provider>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App/>);
 </script>
 </body>
 </html>
