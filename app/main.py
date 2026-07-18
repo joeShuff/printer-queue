@@ -382,15 +382,15 @@ async def get_queue(include_deleted: bool = False) -> dict[str, Any]:
 # MJPEG camera stream relay
 # ---------------------------------------------------------------------------
 # The AD5X camera only accepts one connection at a time. We connect once and
-# fan the stream out to every browser client via per-client asyncio queues.
+# fan the stream out to every client via per-client asyncio queues.
 
 _stream_clients: set[asyncio.Queue] = set()
-_stream_task: asyncio.Task | None = None
-_stream_url: str | None = None   # populated from /detail on first use
+_stream_task:    asyncio.Task | None = None
+_stream_url:     str | None = None
+_stream_content_type: str = "multipart/x-mixed-replace; boundary=boundarydonotcross"
 
 
 async def _fetch_stream_url() -> str | None:
-    """Get the camera stream URL from the printer's /detail endpoint."""
     try:
         result = await _proxy("/detail", {
             "serialNumber": settings.PRINTER_SERIAL,
@@ -404,12 +404,10 @@ async def _fetch_stream_url() -> str | None:
 
 async def _stream_relay() -> None:
     """
-    Background task: connect to the camera MJPEG stream and broadcast
-    each frame to all connected client queues.
-    Reconnects automatically on disconnect.
+    Connect to the camera MJPEG stream once and broadcast each chunk
+    to all connected client queues. Reconnects automatically on failure.
     """
-    global _stream_url
-    SENTINEL = None  # signals clients to close
+    global _stream_url, _stream_content_type
 
     while True:
         if not _stream_clients:
@@ -433,7 +431,12 @@ async def _stream_relay() -> None:
                         await asyncio.sleep(5)
                         continue
 
-                    # Forward raw bytes chunks to every client queue
+                    # Capture the real Content-Type so clients get the correct boundary
+                    ct = resp.headers.get("Content-Type", "")
+                    if ct:
+                        _stream_content_type = ct
+                        log.info("Camera Content-Type: %s", ct)
+
                     async for chunk in resp.content.iter_any():
                         if not chunk:
                             continue
@@ -442,7 +445,7 @@ async def _stream_relay() -> None:
                             try:
                                 q.put_nowait(chunk)
                             except asyncio.QueueFull:
-                                dead.add(q)   # slow/gone client — drop it
+                                dead.add(q)
                         _stream_clients.difference_update(dead)
                         if not _stream_clients:
                             log.info("Camera relay: no clients, disconnecting")
@@ -459,19 +462,57 @@ def _ensure_relay_running() -> None:
         _stream_task = asyncio.create_task(_stream_relay())
 
 
-@app.get("/printer/stream", tags=["Printer"], summary="MJPEG camera stream (multi-client relay)")
-async def camera_stream() -> Response:
+@app.get("/printer/stream/debug", tags=["Printer"], summary="Debug info for the camera stream")
+async def camera_stream_debug() -> dict[str, Any]:
     """
-    Relay the printer's MJPEG camera stream. Connects to the camera once
-    and fans the stream to all connected clients, working around the
-    camera's single-connection limit.
+    Connects to the camera and returns the raw response headers and first
+    chunk of data (hex + text) without relaying anything to clients.
+    Use this to diagnose stream compatibility issues.
+    """
+    url = await _fetch_stream_url()
+    if not url:
+        return {"error": "Could not fetch stream URL from printer /detail"}
 
-    Use as an <img src="/printer/stream"> in the UI.
+    result: dict[str, Any] = {"url": url}
+    try:
+        timeout = aiohttp.ClientTimeout(total=5, connect=3)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as resp:
+                result["status"] = resp.status
+                result["headers"] = dict(resp.headers)
+                result["content_type"] = resp.headers.get("Content-Type", "")
+
+                # Read the first 2KB to show what the stream looks like
+                chunk = await resp.content.read(2048)
+                result["first_bytes_hex"]  = chunk.hex()
+                result["first_bytes_text"] = chunk.decode("latin-1", errors="replace")
+                result["first_bytes_len"]  = len(chunk)
+
+                # Try to extract the boundary from the data itself
+                import re
+                boundaries = re.findall(rb'--([^\r\n]+)', chunk[:512])
+                result["boundaries_found"] = [b.decode("latin-1") for b in boundaries]
+
+    except Exception as exc:
+        result["error"] = str(exc)
+
+    return result
+
+
+@app.get("/printer/stream", tags=["Printer"], summary="MJPEG camera stream (multi-client relay)")
+async def camera_stream(request: Request) -> StreamingResponse:
+    """
+    Relay the printer's MJPEG camera stream to multiple clients simultaneously.
+    The camera only accepts one connection — this endpoint fans it out to all
+    connected clients.
+
+    Compatible with browsers (`<img src="/printer/stream">`), VLC, and
+    applications like PrinterGuard.
     """
     if not settings.PRINTER_IP:
         raise HTTPException(status_code=503, detail="Printer not configured")
 
-    q: asyncio.Queue = asyncio.Queue(maxsize=30)
+    q: asyncio.Queue = asyncio.Queue(maxsize=60)
     _stream_clients.add(q)
     _ensure_relay_running()
 
@@ -482,15 +523,22 @@ async def camera_stream() -> Response:
                 if chunk is None:
                     break
                 yield chunk
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, asyncio.CancelledError):
             pass
         finally:
             _stream_clients.discard(q)
 
     return StreamingResponse(
         generate(),
-        media_type="multipart/x-mixed-replace; boundary=boundarydonotcross",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        media_type=_stream_content_type,
+        headers={
+            "Cache-Control":      "no-cache, no-store, must-revalidate",
+            "Pragma":             "no-cache",
+            "Expires":            "0",
+            "X-Accel-Buffering":  "no",       # disable nginx buffering
+            "Access-Control-Allow-Origin": "*", # allow PrinterGuard/external apps
+            "Connection":         "close",
+        },
     )
 
 
