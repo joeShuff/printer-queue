@@ -391,6 +391,13 @@ _stream_content_type: str = "multipart/x-mixed-replace; boundary=boundarydonotcr
 
 
 async def _fetch_stream_url() -> str | None:
+    """
+    Return the camera stream URL.
+    If CAMERA_STREAM_URL is configured use that directly — no printer call needed.
+    Otherwise fetch from the printer's /detail endpoint.
+    """
+    if settings.CAMERA_STREAM_URL:
+        return settings.CAMERA_STREAM_URL
     try:
         result = await _proxy("/detail", {
             "serialNumber": settings.PRINTER_SERIAL,
@@ -542,7 +549,7 @@ async def camera_stream(request: Request) -> StreamingResponse:
     )
 
 
-
+@app.get("/printer/thumbnail", tags=["Printer"], summary="Current print thumbnail (HTTPS-safe proxy)")
 async def printer_thumbnail() -> Response:
     """
     Proxy the current print thumbnail from the printer.
@@ -661,7 +668,7 @@ async def queue_status() -> dict[str, Any]:
                 "z_offset":           detail.get("zAxisCompensation", 0),
                 "error_code":         detail.get("errorCode", ""),
                 "door_open":          detail.get("doorStatus", "close") == "open",
-                "has_camera":         bool(detail.get("cameraStreamUrl")),
+                "has_camera":         bool(settings.CAMERA_STREAM_URL or detail.get("cameraStreamUrl")),
                 "estimated_right_len": detail.get("estimatedRightLen", 0),
                 "cumulative_filament": detail.get("cumulativeFilament", 0),
                 "cumulative_time":    detail.get("cumulativePrintTime", 0),
