@@ -81,6 +81,8 @@ from .config import settings
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("main")
 
+import os as _os
+
 app = FastAPI(
     title="AD5X Print Queue",
     version="2.0.0",
@@ -93,6 +95,10 @@ Status and control requests are forwarded live to the real printer; uploads are 
 Use `/queue/next` or per-job `/queue/{id}/send` to dispatch jobs when ready.
 """,
     openapi_tags=TAGS,
+    # When running as a HA addon, the supervisor sets INGRESS_PATH to the
+    # path prefix it uses (e.g. /api/hassio_ingress/xxxx). FastAPI's root_path
+    # makes all generated URLs and the Swagger UI work correctly behind the proxy.
+    root_path=_os.getenv("INGRESS_PATH", ""),
 )
 
 PRINTER_BASE = f"http://{settings.PRINTER_IP}:8898"

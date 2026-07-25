@@ -1,0 +1,54 @@
+---
+name: "AD5X Print Queue"
+description: "Self-hosted print queue proxy for the FlashForge AD5X with IFS. Upload jobs from OrcaSlicer and manage the queue from a web UI accessible through Home Assistant."
+version: "2.0.0"
+slug: "ad5x_print_queue"
+init: false
+
+# OrcaSlicer connects directly on port 8898 (bypasses ingress)
+ports:
+  8898/tcp: 8898
+ports_description:
+  8898/tcp: "FlashForge proxy port — point OrcaSlicer here"
+
+# Ingress — web UI accessible through HA, works with Nabu Casa
+ingress: true
+ingress_port: 8099
+ingress_stream: true
+
+panel_icon: "mdi:printer-3d"
+panel_title: "Print Queue"
+
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+
+# Pre-built images from GHCR (built by GitHub Actions)
+image: "ghcr.io/yourname/printer-queue/ad5x-print-queue-{arch}"
+
+homeassistant_api: false
+hassio_api: false
+
+# Persistent storage — survives addon updates
+map:
+  - type: share
+    path: /share/printer-queue
+    read_only: false
+
+startup: application
+watchdog: "http://[HOST]:[PORT:8099]/health"
+
+# User-configurable options shown in the HA addon UI
+options:
+  printer_ip: ""
+  printer_serial: ""
+  printer_check_code: ""
+  camera_stream_url: ""
+
+schema:
+  printer_ip: str
+  printer_serial: str
+  printer_check_code: str
+  camera_stream_url: str?
