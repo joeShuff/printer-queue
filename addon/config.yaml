@@ -26,7 +26,7 @@ arch:
   - armv7
 
 # Pre-built images from GHCR (built by GitHub Actions)
-image: "ghcr.io/joeShuff/printer-queue/ad5x-print-queue-{arch}"
+image: "ghcr.io/joeshuff/printer-queue/ad5x-print-queue-{arch}"
 
 homeassistant_api: false
 hassio_api: false
