@@ -220,7 +220,7 @@ printer-queue/
 ## Local development
 
 ```bash
-git clone https://github.com/yourname/printer-queue.git
+git clone https://github.com/joeShuff/printer-queue.git
 cd printer-queue
 pip install -r requirements.txt
 

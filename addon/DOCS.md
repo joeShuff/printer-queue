@@ -6,7 +6,7 @@ Adds the AD5X Print Queue as a native Home Assistant addon, accessible through t
 
 1. In Home Assistant go to **Settings → Add-ons → Add-on Store**
 2. Click the three-dot menu (⋮) → **Repositories**
-3. Add: `https://github.com/yourname/printer-queue`
+3. Add: `https://github.com/joeShuff/printer-queue`
 4. Find **AD5X Print Queue** and click **Install**
 
 ## Configuration
