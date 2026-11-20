@@ -673,8 +673,8 @@ async def configure_filament(body: FilamentConfigRequest) -> dict[str, Any]:
 
     status = str(detail.get("status", "")).lower()
     matl = detail.get("matlStationInfo", {})
-    if status in {"printing", "pause", "paused", "pausing", "heating", "loading", "canceling"}:
-        raise HTTPException(status_code=409, detail="Filament settings cannot be changed while the printer is busy")
+    if status not in {"ready", "idle", "completed", "cancel"}:
+        raise HTTPException(status_code=409, detail="Filament settings require an idle printer")
     if matl.get("stateAction", 0):
         raise HTTPException(status_code=409, detail="Wait for the current IFS operation to finish")
 
@@ -720,8 +720,8 @@ async def filament_action(body: FilamentActionRequest) -> dict[str, Any]:
         if state_action == 0:
             raise HTTPException(status_code=409, detail="There is no IFS operation to cancel")
     else:
-        if status in {"printing", "pause", "paused", "pausing", "heating", "loading", "canceling"}:
-            raise HTTPException(status_code=409, detail="Filament cannot be changed while the printer is busy")
+        if status not in {"ready", "idle", "completed", "cancel"}:
+            raise HTTPException(status_code=409, detail="Filament actions require an idle printer")
         if state_action:
             raise HTTPException(status_code=409, detail="Another IFS operation is already in progress")
         slot_info = next((item for item in matl.get("slotInfos", []) if int(item.get("slotId", 0)) == slot), None)
