@@ -441,14 +441,19 @@ function PrinterPanel({
   const filamentAvailable = printer?.has_matl_station && ["ready","idle","completed","cancel"].includes(String(state).toLowerCase()) && !Number(printer?.ifs_state_action || 0);
 
   useEffect(() => {
-    const next = {};
-    slotInfos.forEach(slot => {
-      next[slot.slotId] = {
-        material_name: slot.materialName || "PLA",
-        color: (slot.materialColor || "#FFFFFF").replace("#", ""),
-      };
+    setSlotDrafts(previous => {
+      const next = {...previous};
+      slotInfos.forEach(slot => {
+        // Preserve unsaved edits while the five-second status poll runs.
+        if (!next[slot.slotId]) {
+          next[slot.slotId] = {
+            material_name: slot.materialName || "PLA",
+            color: (slot.materialColor || "#FFFFFF").replace("#", ""),
+          };
+        }
+      });
+      return next;
     });
-    setSlotDrafts(next);
   }, [JSON.stringify(slotInfos)]);
 
   async function filamentRequest(kind, payload) {
