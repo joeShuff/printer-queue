@@ -407,7 +407,7 @@ function FilamentPicker({
 
 // ── Printer Panel ─────────────────────────────────────────────────────────────
 function PrinterPanel({
-  printer, loading, onControl }) {
+  printer, loading, onControl, onRefresh }) {
   const C = useC();
   const [expanded, setExpanded] = useState(false);
   const [showConn, setShowConn] = useState(false);
@@ -464,7 +464,7 @@ function PrinterPanel({
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Filament operation failed");
       setFilamentMessage(kind === "action" ? `${payload.action} command sent for slot ${payload.slot}` : `Slot ${payload.slot} updated`);
-      if (window.refreshPrinterStatus) await window.refreshPrinterStatus();
+      if (onRefresh) await onRefresh();
     } catch (error) {
       setFilamentMessage(error.message);
     } finally {
@@ -1159,7 +1159,7 @@ function App() {
 
       <main style={{maxWidth:800,margin:"0 auto",padding:"16px 12px",display:"flex",flexDirection:"column",gap:14}}>
 
-        <PrinterPanel printer={status?.printer} loading={loadingStatus} onControl={controlPrinter}/>
+        <PrinterPanel printer={status?.printer} loading={loadingStatus} onControl={controlPrinter} onRefresh={refresh}/>
 
         {/* Stats strip */}
         <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}} className="stats-grid">
