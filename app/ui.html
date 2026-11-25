@@ -542,34 +542,32 @@ function PrinterPanel({
         )}
 
         {/* Controls */}
-        {(active || true) && (
-          <div style={{padding:"12px 16px",display:"flex",gap:8,flexWrap:"wrap",borderTop:`1px solid ${C.border}`}}>
-            {active && (
-              <>
-                {printing && (
-                  <Btn onClick={() => onControl("jobCtl_cmd",{action:"pause"})} variant="default" size="sm">
-                    ⏸ Pause
-                  </Btn>
-                )}
-                {paused && (
-                  <Btn onClick={() => onControl("jobCtl_cmd",{action:"continue"})} variant="primary" size="sm">
-                    ▶ Resume
-                  </Btn>
-                )}
-                <Btn onClick={() => { if(confirm("Cancel the current print?")) onControl("jobCtl_cmd",{action:"cancel"}); }}
-                     variant="danger" size="sm">
-                  ✕ Cancel
+        <div style={{padding:"12px 16px",display:"flex",gap:8,flexWrap:"wrap",borderTop:`1px solid ${C.border}`}}>
+          {active && (
+            <>
+              {printing && (
+                <Btn onClick={() => onControl("jobCtl_cmd",{action:"pause"})} variant="default" size="sm">
+                  ⏸ Pause
                 </Btn>
-              </>
-            )}
-            <div style={{marginLeft:"auto"}}>
-              <Btn onClick={() => onControl("lightControl_cmd",{status:printer?.light==="open"?"close":"open"})}
-                   variant="ghost" size="sm">
-                💡 {printer?.light==="open" ? "On" : "Off"}
+              )}
+              {paused && (
+                <Btn onClick={() => onControl("jobCtl_cmd",{action:"continue"})} variant="primary" size="sm">
+                  ▶ Resume
+                </Btn>
+              )}
+              <Btn onClick={() => { if(confirm("Cancel the current print?")) onControl("jobCtl_cmd",{action:"cancel"}); }}
+                   variant="danger" size="sm">
+                ✕ Cancel
               </Btn>
-            </div>
+            </>
+          )}
+          <div style={{marginLeft:"auto"}}>
+            <Btn onClick={() => onControl("lightControl_cmd",{status:printer?.light==="open"?"close":"open"})}
+                 variant="ghost" size="sm">
+              💡 {printer?.light==="open" ? "On" : "Off"}
+            </Btn>
           </div>
-        )}
+        </div>
 
         {/* Clear platform */}
         {!active && printer?.file && (
