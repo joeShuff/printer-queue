@@ -407,7 +407,7 @@ function FilamentPicker({
 
 // ── Printer Panel ─────────────────────────────────────────────────────────────
 function PrinterPanel({
-  printer, loading, onControl }) {
+  printer, loading, onControl, onRefresh }) {
   const C = useC();
   const [expanded, setExpanded] = useState(false);
   const [showConn, setShowConn] = useState(false);
@@ -435,6 +435,47 @@ function PrinterPanel({
   const currentSlot = printer?.current_slot;
   const slotInfos   = printer?.slot_infos ?? [];
   const activeSlot  = slotInfos.find(s => s.slotId === currentSlot);
+  const [slotDrafts, setSlotDrafts] = useState({});
+  const [filamentBusy, setFilamentBusy] = useState(null);
+  const [filamentMessage, setFilamentMessage] = useState("");
+  const filamentAvailable = printer?.has_matl_station && ["ready","idle","completed","cancel"].includes(String(state).toLowerCase()) && !Number(printer?.ifs_state_action || 0);
+
+  useEffect(() => {
+    setSlotDrafts(previous => {
+      const next = {...previous};
+      slotInfos.forEach(slot => {
+        // Preserve unsaved edits while the five-second status poll runs.
+        if (!next[slot.slotId]) {
+          next[slot.slotId] = {
+            material_name: slot.materialName || "PLA",
+            color: (slot.materialColor || "#FFFFFF").replace("#", ""),
+          };
+        }
+      });
+      return next;
+    });
+  }, [JSON.stringify(slotInfos)]);
+
+  async function filamentRequest(kind, payload) {
+    const key = kind + "-" + payload.slot;
+    setFilamentBusy(key);
+    setFilamentMessage("");
+    try {
+      const response = await fetch(`${API}/printer/filaments/${kind}`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Filament operation failed");
+      setFilamentMessage(kind === "action" ? `${payload.action} command sent for slot ${payload.slot}` : `Slot ${payload.slot} updated`);
+      if (onRefresh) await onRefresh();
+    } catch (error) {
+      setFilamentMessage(error.message);
+    } finally {
+      setFilamentBusy(null);
+    }
+  }
 
   return (
     <>
@@ -576,6 +617,54 @@ function PrinterPanel({
             <Btn onClick={() => onControl("stateCtrl_cmd",{action:"setClearPlatform"})} variant="primary" size="sm">
               ✓ Clear platform
             </Btn>
+          </div>
+        )}
+
+        {/* Filament management */}
+        {printer?.has_matl_station && (
+          <div style={{padding:"14px 16px",borderTop:`1px solid ${C.border}`}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+              <div style={{fontSize:12,fontWeight:600,color:C.textPri,textTransform:"uppercase",letterSpacing:"0.05em"}}>Filament management</div>
+              <Chip label={Number(printer?.ifs_state_action||0) ? "IFS busy" : filamentAvailable ? "Ready" : "Printer busy"} color={filamentAvailable?C.success:C.warning} />
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>
+              {slotInfos.map(slot => {
+                const draft = slotDrafts[slot.slotId] || {material_name:slot.materialName||"PLA",color:(slot.materialColor||"#FFFFFF").replace("#","")};
+                const isCurrent = Number(slot.slotId) === Number(currentSlot);
+                const busy = !!filamentBusy;
+                return (
+                  <div key={slot.slotId} style={{border:`1px solid ${isCurrent?C.teal:C.border}`,background:isCurrent?C.tealLight:C.bg,borderRadius:8,padding:10,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:8}}>
+                      <span style={{width:18,height:18,borderRadius:5,background:`#${draft.color}`,border:`1px solid ${C.border}`,flexShrink:0}}/>
+                      <strong style={{fontSize:12}}>Slot {slot.slotId}</strong>
+                      <span style={{fontSize:11,color:C.textMuted,marginLeft:"auto"}}>{isCurrent?"In extruder":slot.hasFilament?"Loaded":"Empty"}</span>
+                    </div>
+                    <label style={{display:"block",fontSize:10,color:C.textMuted,marginBottom:3}}>Material</label>
+                    <select value={draft.material_name} disabled={busy || !filamentAvailable} onChange={e=>setSlotDrafts(p=>({...p,[slot.slotId]:{...draft,material_name:e.target.value}}))} style={{width:"100%",padding:"6px",marginBottom:7,border:`1px solid ${C.border}`,borderRadius:5,background:C.surface,color:C.textPri,fontSize:12}}>
+                      {["PLA","ABS","PETG","TPU","PLA-CF","PETG-CF","SILK"].map(m=><option key={m}>{m}</option>)}
+                    </select>
+                    <label style={{display:"block",fontSize:10,color:C.textMuted,marginBottom:3}}>Colour</label>
+                    <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:8}}>
+                      <input type="color" value={`#${draft.color}`} disabled={busy || !filamentAvailable} onChange={e=>setSlotDrafts(p=>({...p,[slot.slotId]:{...draft,color:e.target.value.slice(1).toUpperCase()}}))} style={{width:32,height:28,padding:0,border:0,background:"transparent"}}/>
+                      <input value={draft.color} disabled={busy || !filamentAvailable} maxLength={6} onChange={e=>setSlotDrafts(p=>({...p,[slot.slotId]:{...draft,color:e.target.value.replace(/[^0-9a-f]/gi,"").slice(0,6).toUpperCase()}}))} style={{width:76,padding:"5px",border:`1px solid ${C.border}`,borderRadius:5,background:C.surface,color:C.textPri,fontSize:11,fontFamily:"monospace"}}/>
+                      <button disabled={busy || !filamentAvailable || draft.color.length!==6} onClick={()=>filamentRequest("config",{slot:slot.slotId,material_name:draft.material_name,color:draft.color})} style={{marginLeft:"auto",padding:"6px 8px",fontSize:11,border:0,borderRadius:5,background:C.teal,color:"#fff",opacity:busy||!filamentAvailable?0.45:1}}>Save</button>
+                    </div>
+                    <div style={{display:"flex",gap:6}}>
+                      <button disabled={busy || !filamentAvailable || !slot.hasFilament} onClick={()=>{if(confirm(`Load filament from IFS slot ${slot.slotId}?`)) filamentRequest("action",{slot:slot.slotId,action:"load"});}} style={{flex:1,padding:"7px 4px",border:`1px solid ${C.border}`,borderRadius:5,background:C.surface,color:C.textPri,fontSize:11,opacity:busy||!filamentAvailable||!slot.hasFilament?0.4:1}}>Load</button>
+                      <button disabled={busy || !filamentAvailable || !slot.hasFilament || !isCurrent} onClick={()=>{if(confirm(`Unload filament from slot ${slot.slotId}? The nozzle will be heated as required.`)) filamentRequest("action",{slot:slot.slotId,action:"unload"});}} style={{flex:1,padding:"7px 4px",border:`1px solid ${C.border}`,borderRadius:5,background:C.surface,color:C.textPri,fontSize:11,opacity:busy||!filamentAvailable||!slot.hasFilament||!isCurrent?0.4:1}}>Unload</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {Number(printer?.ifs_state_action||0)>0 && (
+              <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10}}>
+                <span style={{fontSize:12,color:C.warning,flex:1}}>IFS operation in progress · step {printer?.ifs_state_step ?? 0}</span>
+                <Btn size="sm" variant="danger" onClick={()=>{if(confirm("Cancel the current filament operation?")) filamentRequest("action",{slot:0,action:"cancel"});}}>Cancel</Btn>
+              </div>
+            )}
+            {filamentMessage && <div style={{fontSize:12,color:filamentMessage.toLowerCase().includes("failed")||filamentMessage.toLowerCase().includes("error")?C.error:C.textSec,marginTop:8}}>{filamentMessage}</div>}
+            <div style={{fontSize:10,color:C.textMuted,marginTop:8}}>Load and unload are only enabled while the printer is idle. Slot metadata changes are sent to the printer.</div>
           </div>
         )}
 
@@ -1077,7 +1166,7 @@ function App() {
 
       <main style={{maxWidth:800,margin:"0 auto",padding:"16px 12px",display:"flex",flexDirection:"column",gap:14}}>
 
-        <PrinterPanel printer={status?.printer} loading={loadingStatus} onControl={controlPrinter}/>
+        <PrinterPanel printer={status?.printer} loading={loadingStatus} onControl={controlPrinter} onRefresh={refresh}/>
 
         {/* Stats strip */}
         <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}} className="stats-grid">

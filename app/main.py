@@ -63,6 +63,15 @@ class ReorderRequest(BaseModel):
     order: list[int] = Field(..., example=[3, 1, 2],
                              description="Job IDs in desired queue order (first = next to print)")
 
+class FilamentConfigRequest(BaseModel):
+    slot: int
+    material_name: str
+    color: str
+
+class FilamentActionRequest(BaseModel):
+    slot: int
+    action: str
+
 # ---------------------------------------------------------------------------
 # Tags for grouping endpoints in Swagger UI
 # ---------------------------------------------------------------------------
@@ -639,6 +648,101 @@ async def printer_detail() -> JSONResponse:
     return JSONResponse(result)
 
 
+@app.post("/printer/filaments/config", tags=["Printer"], summary="Configure IFS slot material and colour")
+async def configure_filament(body: FilamentConfigRequest) -> dict[str, Any]:
+    """Set the material and RGB metadata for one of the four AD5X IFS slots."""
+    if body.slot not in range(1, 5):
+        raise HTTPException(status_code=422, detail="Slot must be between 1 and 4")
+
+    material = body.material_name.strip().upper()
+    allowed_materials = {"PLA", "ABS", "PETG", "TPU", "PLA-CF", "PETG-CF", "SILK"}
+    if material not in allowed_materials:
+        raise HTTPException(status_code=422, detail="Unsupported material type")
+
+    colour = body.color.strip().lstrip("#").upper()
+    if len(colour) != 6 or any(char not in "0123456789ABCDEF" for char in colour):
+        raise HTTPException(status_code=422, detail="Colour must be a six-digit hex value")
+
+    raw = await _proxy("/detail", {
+        "serialNumber": settings.PRINTER_SERIAL,
+        "checkCode": settings.PRINTER_CHECK_CODE,
+    })
+    detail = raw.get("detail", {})
+    if not detail.get("hasMatlStation"):
+        raise HTTPException(status_code=409, detail="The printer does not report an IFS material station")
+
+    status = str(detail.get("status", "")).lower()
+    matl = detail.get("matlStationInfo", {})
+    if status not in {"ready", "idle", "completed", "cancel"}:
+        raise HTTPException(status_code=409, detail="Filament settings require an idle printer")
+    if matl.get("stateAction", 0):
+        raise HTTPException(status_code=409, detail="Wait for the current IFS operation to finish")
+
+    result = await _proxy("/control", {
+        "serialNumber": settings.PRINTER_SERIAL,
+        "checkCode": settings.PRINTER_CHECK_CODE,
+        "payload": {
+            "cmd": "msConfig_cmd",
+            "args": {"slot": body.slot, "mt": material, "rgb": colour},
+        },
+    })
+    if result.get("code") != 0:
+        raise HTTPException(status_code=502, detail=result.get("message", "Printer rejected filament settings"))
+    return {"success": True, "slot": body.slot, "material_name": material, "color": f"#{colour}"}
+
+
+@app.post("/printer/filaments/action", tags=["Printer"], summary="Load, unload, or cancel an IFS operation")
+async def filament_action(body: FilamentActionRequest) -> dict[str, Any]:
+    """Run an AD5X IFS load/unload operation. The printer performs heating and feed sequencing."""
+    action = body.action.strip().lower()
+    action_codes = {"load": 0, "unload": 1, "cancel": 2}
+    if action not in action_codes:
+        raise HTTPException(status_code=422, detail="Action must be load, unload, or cancel")
+    if action == "cancel":
+        slot = 0
+    else:
+        if body.slot not in range(1, 5):
+            raise HTTPException(status_code=422, detail="Slot must be between 1 and 4")
+        slot = body.slot
+
+    raw = await _proxy("/detail", {
+        "serialNumber": settings.PRINTER_SERIAL,
+        "checkCode": settings.PRINTER_CHECK_CODE,
+    })
+    detail = raw.get("detail", {})
+    if not detail.get("hasMatlStation"):
+        raise HTTPException(status_code=409, detail="The printer does not report an IFS material station")
+
+    status = str(detail.get("status", "")).lower()
+    matl = detail.get("matlStationInfo", {})
+    state_action = int(matl.get("stateAction", 0) or 0)
+    if action == "cancel":
+        if state_action == 0:
+            raise HTTPException(status_code=409, detail="There is no IFS operation to cancel")
+    else:
+        if status not in {"ready", "idle", "completed", "cancel"}:
+            raise HTTPException(status_code=409, detail="Filament actions require an idle printer")
+        if state_action:
+            raise HTTPException(status_code=409, detail="Another IFS operation is already in progress")
+        slot_info = next((item for item in matl.get("slotInfos", []) if int(item.get("slotId", 0)) == slot), None)
+        if not slot_info or not slot_info.get("hasFilament"):
+            raise HTTPException(status_code=409, detail=f"Slot {slot} does not have filament detected")
+        if action == "unload" and int(matl.get("currentSlot", 0) or 0) != slot:
+            raise HTTPException(status_code=409, detail=f"Slot {slot} is not the currently loaded slot")
+
+    result = await _proxy("/control", {
+        "serialNumber": settings.PRINTER_SERIAL,
+        "checkCode": settings.PRINTER_CHECK_CODE,
+        "payload": {
+            "cmd": "ms_cmd",
+            "args": {"slot": slot, "action": action_codes[action]},
+        },
+    })
+    if result.get("code") != 0:
+        raise HTTPException(status_code=502, detail=result.get("message", "Printer rejected IFS operation"))
+    return {"success": True, "action": action, "slot": slot, "printer_response": result}
+
+
 @app.get("/queue/status", tags=["Queue"], summary="Live printer state and next queued job")
 async def queue_status() -> dict[str, Any]:
     next_job = db.next_queued_job()
@@ -679,7 +783,11 @@ async def queue_status() -> dict[str, Any]:
                 "cumulative_filament": detail.get("cumulativeFilament", 0),
                 "cumulative_time":    detail.get("cumulativePrintTime", 0),
                 "firmware":           detail.get("firmwareVersion", ""),
+                "has_matl_station":   detail.get("hasMatlStation", False),
                 "current_slot":       detail.get("matlStationInfo", {}).get("currentSlot"),
+                "ifs_state_action":   detail.get("matlStationInfo", {}).get("stateAction", 0),
+                "ifs_state_step":     detail.get("matlStationInfo", {}).get("stateStep", 0),
+                "ifs_current_load_slot": detail.get("matlStationInfo", {}).get("currentLoadSlot", 0),
                 "slot_infos":         detail.get("matlStationInfo", {}).get("slotInfos", []),
             }
         except HTTPException:
