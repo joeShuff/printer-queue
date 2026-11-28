@@ -299,7 +299,7 @@
           "Queue"
         ],
         "summary": "Reorder queued jobs",
-        "description": "Supply a list of job IDs in the desired order \u2014 first ID will print next.\nOnly queued jobs are repositioned; other statuses are ignored.",
+        "description": "Supply a list of job IDs in the desired order — first ID will print next.\nOnly queued jobs are repositioned; other statuses are ignored.",
         "operationId": "reorder_queue_queue_reorder_post",
         "requestBody": {
           "content": {
@@ -608,6 +608,52 @@
           }
         }
       }
+    },
+    "/printer/temperature": {
+      "post": {
+        "tags": [
+          "Printer"
+        ],
+        "summary": "Set bed and nozzle target temperatures",
+        "description": "Set either heater independently while the printer is idle. Omitted values are left unchanged. Use -100 to turn an individual heater off.",
+        "operationId": "set_printer_temperature_printer_temperature_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemperatureControlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Printer is not idle"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -711,6 +757,36 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "TemperatureControlRequest": {
+        "properties": {
+          "bed_temp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bed Temp",
+            "description": "Bed target in °C (0–100); -100 turns the heater off"
+          },
+          "nozzle_temp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nozzle Temp",
+            "description": "Nozzle target in °C (0–265); -100 turns the heater off"
+          }
+        },
+        "type": "object",
+        "title": "TemperatureControlRequest"
       }
     }
   },
@@ -725,7 +801,7 @@
     },
     {
       "name": "Proxy",
-      "description": "FlashForge protocol endpoints proxied to the real printer \u2014 used by OrcaSlicer, not intended for direct use"
+      "description": "FlashForge protocol endpoints proxied to the real printer — used by OrcaSlicer, not intended for direct use"
     },
     {
       "name": "Utility",

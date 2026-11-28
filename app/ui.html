@@ -438,6 +438,11 @@ function PrinterPanel({
   const [slotDrafts, setSlotDrafts] = useState({});
   const [filamentBusy, setFilamentBusy] = useState(null);
   const [filamentMessage, setFilamentMessage] = useState("");
+  const [bedTempDraft, setBedTempDraft] = useState("45");
+  const [nozzleTempDraft, setNozzleTempDraft] = useState("0");
+  const [temperatureBusy, setTemperatureBusy] = useState(null);
+  const [temperatureMessage, setTemperatureMessage] = useState("");
+  const temperatureAvailable = ["ready","idle","completed","cancel"].includes(String(state).toLowerCase());
   const filamentAvailable = printer?.has_matl_station && ["ready","idle","completed","cancel"].includes(String(state).toLowerCase()) && !Number(printer?.ifs_state_action || 0);
 
   useEffect(() => {
@@ -455,6 +460,29 @@ function PrinterPanel({
       return next;
     });
   }, [JSON.stringify(slotInfos)]);
+
+  async function setTemperature(kind, value) {
+    setTemperatureBusy(kind);
+    setTemperatureMessage("");
+    try {
+      const payload = kind === "bed" ? {bed_temp: value} : {nozzle_temp: value};
+      const response = await fetch(`${API}/printer/temperature`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Temperature command failed");
+      setTemperatureMessage(kind === "bed"
+        ? (value === -100 ? "Bed heater switched off" : `Bed target set to ${value}°C`)
+        : (value === -100 ? "Nozzle heater switched off" : `Nozzle target set to ${value}°C`));
+      if (onRefresh) await onRefresh();
+    } catch (error) {
+      setTemperatureMessage(error.message);
+    } finally {
+      setTemperatureBusy(null);
+    }
+  }
 
   async function filamentRequest(kind, payload) {
     const key = kind + "-" + payload.slot;
@@ -619,6 +647,42 @@ function PrinterPanel({
             </Btn>
           </div>
         )}
+
+        {/* Temperature controls */}
+        <div style={{padding:"14px 16px",borderTop:`1px solid ${C.border}`}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+            <div style={{fontSize:12,fontWeight:600,color:C.textPri,textTransform:"uppercase",letterSpacing:"0.05em"}}>Temperature control</div>
+            <Chip label={temperatureAvailable ? "Ready" : "Printer busy"} color={temperatureAvailable ? C.success : C.warning}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>
+            <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:10,minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:500,color:C.textPri,marginBottom:6}}>Bed</div>
+              <div style={{fontSize:12,color:C.textMuted,marginBottom:8}}>Current: {Math.round(Number(printer?.bed_temp)||0)}°C · Target: {Math.round(Number(printer?.bed_target)||0)}°C</div>
+              <input type="number" min="0" max="100" step="1" value={bedTempDraft}
+                onChange={e=>setBedTempDraft(e.target.value)}
+                disabled={!temperatureAvailable || !!temperatureBusy}
+                style={{width:"100%",padding:"8px",border:`1px solid ${C.border}`,borderRadius:6,background:C.surface,color:C.textPri,fontSize:14,marginBottom:8}}/>
+              <div style={{display:"flex",gap:6}}>
+                <Btn onClick={()=>setTemperature("bed",Number(bedTempDraft))} disabled={!temperatureAvailable || !!temperatureBusy || bedTempDraft==="" || !Number.isInteger(Number(bedTempDraft)) || Number(bedTempDraft)<0 || Number(bedTempDraft)>100} loading={temperatureBusy==="bed"} variant="primary" size="sm">Set bed</Btn>
+                <Btn onClick={()=>setTemperature("bed",-100)} disabled={!temperatureAvailable || !!temperatureBusy} variant="ghost" size="sm">Off</Btn>
+              </div>
+            </div>
+            <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:10,minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:500,color:C.textPri,marginBottom:6}}>Nozzle</div>
+              <div style={{fontSize:12,color:C.textMuted,marginBottom:8}}>Current: {Math.round(Number(printer?.nozzle_temp)||0)}°C · Target: {Math.round(Number(printer?.nozzle_target)||0)}°C</div>
+              <input type="number" min="0" max="265" step="1" value={nozzleTempDraft}
+                onChange={e=>setNozzleTempDraft(e.target.value)}
+                disabled={!temperatureAvailable || !!temperatureBusy}
+                style={{width:"100%",padding:"8px",border:`1px solid ${C.border}`,borderRadius:6,background:C.surface,color:C.textPri,fontSize:14,marginBottom:8}}/>
+              <div style={{display:"flex",gap:6}}>
+                <Btn onClick={()=>setTemperature("nozzle",Number(nozzleTempDraft))} disabled={!temperatureAvailable || !!temperatureBusy || nozzleTempDraft==="" || !Number.isInteger(Number(nozzleTempDraft)) || Number(nozzleTempDraft)<0 || Number(nozzleTempDraft)>265} loading={temperatureBusy==="nozzle"} variant="primary" size="sm">Set nozzle</Btn>
+                <Btn onClick={()=>setTemperature("nozzle",-100)} disabled={!temperatureAvailable || !!temperatureBusy} variant="ghost" size="sm">Off</Btn>
+              </div>
+            </div>
+          </div>
+          {temperatureMessage && <div style={{fontSize:12,color:temperatureMessage.toLowerCase().includes("failed")||temperatureMessage.toLowerCase().includes("only available")?C.error:C.success,marginTop:8}}>{temperatureMessage}</div>}
+          <div style={{fontSize:11,color:C.textMuted,marginTop:8}}>Heaters can be controlled independently. Controls are disabled while a print is active.</div>
+        </div>
 
         {/* Filament management */}
         {printer?.has_matl_station && (
