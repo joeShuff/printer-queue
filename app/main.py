@@ -72,6 +72,11 @@ class FilamentActionRequest(BaseModel):
     slot: int
     action: str
 
+
+class TemperatureControlRequest(BaseModel):
+    bed_temp: int | None = None
+    nozzle_temp: int | None = None
+
 # ---------------------------------------------------------------------------
 # Tags for grouping endpoints in Swagger UI
 # ---------------------------------------------------------------------------
@@ -636,6 +641,46 @@ async def printer_control(body: ControlRequest) -> JSONResponse:
         },
     })
     return JSONResponse(result)
+
+
+@app.post("/printer/temperature", tags=["Printer"], summary="Set bed and nozzle target temperatures")
+async def set_printer_temperature(body: TemperatureControlRequest) -> dict[str, Any]:
+    """
+    Set either heater independently while the printer is idle.
+
+    Omitted values are left unchanged. Use -100 to turn an individual heater off.
+    """
+    if body.bed_temp is None and body.nozzle_temp is None:
+        raise HTTPException(status_code=422, detail="Set at least one temperature")
+
+    if body.bed_temp is not None and body.bed_temp != -100 and not 0 <= body.bed_temp <= 100:
+        raise HTTPException(status_code=422, detail="Bed temperature must be between 0 and 100°C, or -100 to turn it off")
+    if body.nozzle_temp is not None and body.nozzle_temp != -100 and not 0 <= body.nozzle_temp <= 265:
+        raise HTTPException(status_code=422, detail="Nozzle temperature must be between 0 and 265°C, or -100 to turn it off")
+
+    raw = await _proxy("/detail", {
+        "serialNumber": settings.PRINTER_SERIAL,
+        "checkCode": settings.PRINTER_CHECK_CODE,
+    })
+    detail = raw.get("detail", {})
+    status = str(detail.get("status", "")).lower()
+    if status not in {"ready", "idle", "completed", "cancel"}:
+        raise HTTPException(status_code=409, detail="Temperature controls are only available when the printer is idle")
+
+    args: dict[str, int] = {}
+    if body.bed_temp is not None:
+        args["platform"] = body.bed_temp
+    if body.nozzle_temp is not None:
+        args["rightNozzle"] = body.nozzle_temp
+
+    result = await _proxy("/control", {
+        "serialNumber": settings.PRINTER_SERIAL,
+        "checkCode": settings.PRINTER_CHECK_CODE,
+        "payload": {"cmd": "temperatureCtl_cmd", "args": args},
+    })
+    if result.get("code") != 0:
+        raise HTTPException(status_code=502, detail=result.get("message", "Printer rejected temperature settings"))
+    return {"success": True, "bed_temp": body.bed_temp, "nozzle_temp": body.nozzle_temp, "printer_response": result}
 
 
 @app.get("/printer/detail", tags=["Printer"], summary="Full raw detail response from printer")
